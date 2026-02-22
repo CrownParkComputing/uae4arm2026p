@@ -1721,6 +1721,7 @@ public class AmiberryActivity extends SDLActivity {
         // Create larger styled menu buttons with color coding
         final Button btnMenu = createMenuButton("📋  Menu", d, 0xFF1565C0);      // Blue
         final Button btnStates = createMenuButton("💿  Save States", d, 0xFFF57C00); // Orange
+        final Button btnInputMap = createMenuButton("🎮  Input Mapping", d, 0xFF2E7D32); // Green
         final Button btnReset = createMenuButton("🔄  Soft Reset", d, 0xFFC62828);    // Red
         final Button btnRestart = createMenuButton("🔁  Cold Restart", d, 0xFF7B1FA2); // Deep purple
         final Button btnAspect = createMenuButton("📺  Aspect: 16:9", d, 0xFF00838F); // Teal
@@ -1870,6 +1871,7 @@ public class AmiberryActivity extends SDLActivity {
         lpBtn.topMargin = gap;
         menuPanel.addView(btnMenu, lpBtn);
         menuPanel.addView(btnStates, lpBtn);
+        menuPanel.addView(btnInputMap, lpBtn);
         menuPanel.addView(btnReset, lpBtn);
         menuPanel.addView(btnRestart, lpBtn);
         menuPanel.addView(btnAspect, lpBtn);
@@ -2004,6 +2006,19 @@ public class AmiberryActivity extends SDLActivity {
             menuPanel.setVisibility(View.GONE);
             btnHamburger.setText("☰");
             showSaveStateDialog();
+        });
+
+        btnInputMap.setOnClickListener(v -> {
+            menuPanel.setVisibility(View.GONE);
+            btnHamburger.setText("☰");
+            mPausedByOverlay = false;
+            try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
+            try {
+                Intent i = new Intent(this, InputMappingActivity.class);
+                startActivity(i);
+            } catch (Throwable t) {
+                Log.w(TAG, "Unable to open Input Mapping: " + t);
+            }
         });
 
         btnReset.setOnClickListener(v -> {
