@@ -1,0 +1,348 @@
+// Android entrypoint for SDLActivity.
+//
+// SDL2 Android expects a shared library named libmain.so that exports SDL_main().
+// This wrapper forwards to Amiberry's embeddable entrypoint.
+
+#if defined(__ANDROID__)
+#include <jni.h>
+
+#include <atomic>
+
+#include <SDL.h>
+
+#include "sysdeps.h"
+#include "gui.h"
+#include "inputdevice.h"
+#include "keyboard.h"
+#include "options.h"
+#include "vkbd/vkbd.h"
+
+// Android-only runtime toggle: stretch emulation output to fill the full surface.
+// 1 = stretch-to-fill, 0 = preserve aspect (letterbox/pillarbox).
+std::atomic<int> g_amiberry_android_stretch_to_fill{1};
+
+// Android-only runtime video aspect mode.
+// 0 = standard 4:3, 1 = widescreen 16:9.
+std::atomic<int> g_amiberry_android_video_aspect_mode{1};
+
+// Flag to enable/disable virtual joystick processing in native code
+std::atomic<int> g_amiberry_virtual_joy_enabled{0};
+
+// Custom SDL event type used to deliver Android MotionEvent coordinates to the emulation thread.
+// Initialized lazily from the UI thread via SDL_RegisterEvents().
+extern "C" Uint32 g_amiberry_vkbd_touch_event_type = 0;
+
+// Custom SDL event type used to deliver media hot-swap requests to the emulation thread.
+extern "C" Uint32 g_amiberry_android_media_event_type = 0;
+
+// Custom SDL event type used to deliver save state requests to the emulation thread.
+extern "C" Uint32 g_amiberry_android_savestate_event_type = 0;
+
+// Custom SDL event type used to deliver virtual joystick events to the emulation thread.
+extern "C" Uint32 g_amiberry_virtual_joy_event_type = 0;
+
+struct AmiberryVkbdTouchPayload {
+	int action; // MotionEvent.ACTION_* value
+	int x;
+	int y;
+	int viewW;
+	int viewH;
+};
+
+struct AmiberryMediaSwapPayload {
+	int drive; // 0=DF0, 1=DF1
+	char* path; // malloc'd UTF-8 path
+};
+
+struct AmiberrySaveStatePayload {
+    int slot;
+    int mode; // 1=save, 0=load
+};
+
+struct AmiberryVirtualJoyPayload {
+    int axis;
+    int value;
+    int button;
+    int pressed;
+};
+
+static Uint32 ensure_savestate_event_type()
+{
+	if (g_amiberry_android_savestate_event_type != 0)
+		return g_amiberry_android_savestate_event_type;
+	const Uint32 t = SDL_RegisterEvents(1);
+	if (t != ((Uint32)-1))
+		g_amiberry_android_savestate_event_type = t;
+	return g_amiberry_android_savestate_event_type;
+}
+
+static Uint32 ensure_virtual_joy_event_type()
+{
+    if (g_amiberry_virtual_joy_event_type != 0)
+        return g_amiberry_virtual_joy_event_type;
+    const Uint32 t = SDL_RegisterEvents(1);
+    if (t != ((Uint32)-1))
+        g_amiberry_virtual_joy_event_type = t;
+    return g_amiberry_virtual_joy_event_type;
+}
+
+static Uint32 ensure_vkbd_touch_event_type()
+{
+	if (g_amiberry_vkbd_touch_event_type != 0)
+		return g_amiberry_vkbd_touch_event_type;
+	const Uint32 t = SDL_RegisterEvents(1);
+	if (t != ((Uint32)-1))
+		g_amiberry_vkbd_touch_event_type = t;
+	return g_amiberry_vkbd_touch_event_type;
+}
+
+static Uint32 ensure_media_event_type()
+{
+	if (g_amiberry_android_media_event_type != 0)
+		return g_amiberry_android_media_event_type;
+	const Uint32 t = SDL_RegisterEvents(1);
+	if (t != ((Uint32)-1))
+		g_amiberry_android_media_event_type = t;
+	return g_amiberry_android_media_event_type;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeToggleVkbd(JNIEnv*, jclass)
+{
+	// Queue the standard action key for OSK/VKBD.
+	// The core will execute it in the emulation thread.
+	inputdevice_add_inputcode(AKS_OSK, 1, nullptr);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeIsVkbdActive(JNIEnv*, jclass)
+{
+	return vkbd_is_active() ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSendVkbdTouch(JNIEnv*, jclass, jint action, jint x, jint y, jint viewW, jint viewH)
+{
+	const Uint32 t = ensure_vkbd_touch_event_type();
+	if (t == 0 || t == ((Uint32)-1))
+		return;
+
+	auto* payload = static_cast<AmiberryVkbdTouchPayload*>(SDL_malloc(sizeof(AmiberryVkbdTouchPayload)));
+	if (!payload)
+		return;
+	payload->action = (int)action;
+	payload->x = (int)x;
+	payload->y = (int)y;
+	payload->viewW = (int)viewW;
+	payload->viewH = (int)viewH;
+
+	SDL_Event ev;
+	SDL_zero(ev);
+	ev.type = t;
+	ev.user.code = 0;
+	ev.user.data1 = payload;
+	ev.user.data2 = nullptr;
+
+	if (SDL_PushEvent(&ev) != 1)
+	{
+		SDL_free(payload);
+	}
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeInsertFloppy(JNIEnv* env, jclass, jint drive, jstring path)
+{
+	if (!env || !path)
+		return;
+	const Uint32 t = ensure_media_event_type();
+	if (t == 0 || t == ((Uint32)-1))
+		return;
+
+	const char* utf = env->GetStringUTFChars(path, nullptr);
+	if (!utf)
+		return;
+
+	auto* payload = static_cast<AmiberryMediaSwapPayload*>(SDL_malloc(sizeof(AmiberryMediaSwapPayload)));
+	if (!payload)
+	{
+		env->ReleaseStringUTFChars(path, utf);
+		return;
+	}
+	payload->drive = (int)drive;
+	payload->path = SDL_strdup(utf);
+	// release JVM string now
+	env->ReleaseStringUTFChars(path, utf);
+
+	if (!payload->path)
+	{
+		SDL_free(payload);
+		return;
+	}
+
+	SDL_Event ev;
+	SDL_zero(ev);
+	ev.type = t;
+	ev.user.code = 0;
+	ev.user.data1 = payload;
+	ev.user.data2 = nullptr;
+
+	if (SDL_PushEvent(&ev) != 1)
+	{
+		SDL_free(payload->path);
+		SDL_free(payload);
+	}
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSaveState(JNIEnv* env, jclass, jint slot, jint mode)
+{
+    const Uint32 t = ensure_savestate_event_type();
+    if (t == 0 || t == ((Uint32)-1))
+        return;
+
+    auto* payload = static_cast<AmiberrySaveStatePayload*>(SDL_malloc(sizeof(AmiberrySaveStatePayload)));
+    if (!payload)
+        return;
+    payload->slot = (int)slot;
+    payload->mode = (int)mode;
+
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = t;
+    ev.user.code = 0;
+    ev.user.data1 = payload;
+    ev.user.data2 = nullptr;
+
+    if (SDL_PushEvent(&ev) != 1)
+    {
+        SDL_free(payload);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSendVirtualJoystick(JNIEnv* env, jclass, jint axis, jint value, jint button, jint pressed)
+{
+    const Uint32 t = ensure_virtual_joy_event_type();
+    if (t == 0 || t == ((Uint32)-1))
+        return;
+
+    auto* payload = static_cast<AmiberryVirtualJoyPayload*>(SDL_malloc(sizeof(AmiberryVirtualJoyPayload)));
+    if (!payload)
+        return;
+    payload->axis = (int)axis;
+    payload->value = (int)value;
+    payload->button = (int)button;
+    payload->pressed = (int)pressed;
+
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = t;
+    ev.user.code = 0;
+    ev.user.data1 = payload;
+    ev.user.data2 = nullptr;
+
+    if (SDL_PushEvent(&ev) != 1)
+    {
+        SDL_free(payload);
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetStretchToFill(JNIEnv*, jclass, jboolean enabled)
+{
+	g_amiberry_android_stretch_to_fill.store(enabled == JNI_TRUE ? 1 : 0, std::memory_order_relaxed);
+	// Best-effort: update SDL hint immediately. The render path also consults the flag.
+	SDL_SetHint(SDL_HINT_RENDER_LOGICAL_SIZE_MODE, enabled == JNI_TRUE ? "stretch" : "letterbox");
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetStretchToFill(JNIEnv*, jclass)
+{
+	return g_amiberry_android_stretch_to_fill.load(std::memory_order_relaxed) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetVideoAspectMode(JNIEnv*, jclass, jint mode)
+{
+	const int normalized = (mode == 0) ? 0 : 1;
+	g_amiberry_android_video_aspect_mode.store(normalized, std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetVideoAspectMode(JNIEnv*, jclass)
+{
+	return g_amiberry_android_video_aspect_mode.load(std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetCurrentFps(JNIEnv*, jclass)
+{
+	// gui_data.fps is tracked as 10x FPS in core statusline code.
+	const int raw = gui_data.fps;
+	if (raw <= 0)
+		return 0;
+	return (raw + 5) / 10;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetNtscMode(JNIEnv*, jclass, jboolean ntsc)
+{
+	const bool enabled = ntsc == JNI_TRUE;
+	changed_prefs.ntscmode = enabled;
+	currprefs.ntscmode = enabled;
+	set_config_changed();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetFloppySoundVolumePercent(JNIEnv*, jclass, jint percent)
+{
+	int p = (int)percent;
+	if (p < 0)
+		p = 0;
+	if (p > 100)
+		p = 100;
+
+	const int attenuation = 100 - p;
+	const int enabledClick = p > 0 ? 1 : 0;
+
+	for (int i = 0; i < 4; ++i)
+	{
+		changed_prefs.dfxclickvolume_disk[i] = attenuation;
+		changed_prefs.dfxclickvolume_empty[i] = attenuation;
+		changed_prefs.floppyslots[i].dfxclick = enabledClick;
+		if (enabledClick && currprefs.floppyslots[i].dfxclick == 0)
+		{
+			currprefs.floppyslots[i].dfxclick = 1;
+		}
+	}
+
+	set_config_changed();
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetVirtualJoystickEnabled(JNIEnv*, jclass, jboolean enabled)
+{
+	g_amiberry_virtual_joy_enabled.store(enabled == JNI_TRUE ? 1 : 0, std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jboolean JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeIsVirtualJoystickEnabled(JNIEnv*, jclass)
+{
+	return g_amiberry_virtual_joy_enabled.load(std::memory_order_relaxed) != 0 ? JNI_TRUE : JNI_FALSE;
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeResetEmulator(JNIEnv*, jclass)
+{
+	// Queue a soft reset action to be executed on the emulation thread.
+	// This is equivalent to the user pressing the reset key combination.
+	inputdevice_add_inputcode(AKS_SOFTRESET, 1, nullptr);
+}
+#endif
+
+int amiberry_run(int argc, char* argv[]);
+
+extern "C" int SDL_main(int argc, char* argv[])
+{
+	return amiberry_run(argc, argv);
+}

@@ -1,0 +1,200 @@
+# enriched with templates from https://www.gitignore.io/
+
+# Windows reserved filename (created by accident)
+nul
+
+# Amiberry files
+conf/*.uae
+conf/*.conf
+roms/*.rom
+roms/*.key
+/amiberry.conf
+/amiberry.log
+
+# Local debug/build artifacts (do not commit)
+_redir_test.txt
+InstallationLog.txt
+vkbd_logcat*.txt
+logcat_*.txt
+buildlog-*.txt
+assembleDebug_run*.txt
+*stacktrace*.txt
+projects_out*.txt
+projects_stacktrace*.txt
+
+# Android local build output dumps
+android/gradle_assembleDebug.txt
+android/last_build*.txt
+
+# Android local crash/logcat captures
+android/*logcat*.txt
+android/*crash*.txt
+android/*.txt
+*.log
+*.err.log
+
+# Consolidated local debug artifacts
+artifacts/local-debug/
+
+# --- Android local ROM assets (do not commit) ---
+# If you want to bundle AROS ROMs into the APK, place them in either:
+# - android/src/main/assets/roms/ (direct)
+# - android/roms-src/roms/ (preferred; build.gradle adds this as an extra assets dir)
+android/src/main/assets/roms/aros-rom.bin
+android/src/main/assets/roms/aros-ext.bin
+android/roms-src/roms/aros-rom.bin
+android/roms-src/roms/aros-ext.bin
+
+# Generated WHDboot assets are bundled from ../whdboot
+android/src/main/assets/whdboot/
+
+# --- Large HDF files (do not commit) ---
+*.hdf
+whdboot/boot-hdf/
+
+# --- Android signing (do not commit) ---
+android/keystore.properties
+android/keystore/*.jks
+android/keystore/*.keystore
+
+# Android release artifacts (do not commit)
+*.apk
+*.aab
+release.keystore
+
+# Build directories and CMake
+cmake-build-*
+cmake-build-debug
+cmake-build-release
+cmake-build-minsizerel
+cmake-build-relwithdebinfo
+_CPack_Packages
+
+# VisualGDB
+VisualGDB/VisualGDB/Debug
+VisualGDB/VisualGDB/Release
+VisualGDB/Amiberry/VisualGDB
+VisualGDBCache
+CodeDB
+*.opensdf
+*.sdf
+*.suo
+*.old
+
+# NetBeans
+nbproject*
+
+# VSLinux
+VSLinux/obj
+VSLinux/bin
+VSLinux/.vs
+
+# IDEs and Editors
+.idea/
+.vs/
+*.user
+*___jb_old___
+*.orig
+
+# C/C++
+*.d
+*.o
+*.ko
+*.obj
+*.elf
+*.ilk
+*.map
+*.exp
+*.gch
+*.pch
+*.lib
+*.a
+*.la
+*.lo
+*.dll
+*.so
+*.so.*
+*.dylib
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+*.dSYM/
+*.su
+*.idb
+*.pdb
+*.slo
+*.lai
+
+# Android Studio/IntelliJ
+*.iml
+*.iws
+/out/
+.gradle/
+bin/
+gen/
+out/
+build/
+.externalNativeBuild
+android/.cxx/
+captures/
+.navigation/
+*.ipr
+*~
+*.swp
+obj/
+
+# Miscellaneous
+*.db
+*.dep
+*.ast
+*.rdb
+*.npd
+*.rsp
+*.alldeps
+*.lck
+*.psf
+*.000
+*.001
+*.opendb
+*.npa01
+*.idx
+*.dat
+*.sqlite
+*.ipch
+*.db-shm
+*.db-wal
+*.TMP
+*.npa00*
+*.tlog
+
+# Flatpak and Brew
+.flatpak-builder/
+.flatpak/
+Brewfile.lock.json
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+.com.apple.timemachine.supported
+
+# Eclipse
+.classpath
+.project
+.cproject
+.settings/
+
+# Package files
+*.war
+*.ear
+
+# Gradle wrapper
+!/gradle/wrapper/gradle-wrapper.jar
+android/local.properties

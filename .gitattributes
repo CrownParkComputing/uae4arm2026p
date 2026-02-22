@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# Git export-ignore rules
+#
+# Files and directories marked export-ignore are excluded when creating a
+# source distribution via `git archive` (used by the export-to-public.sh
+# script to populate the uae4arm2026p public repository).
+#
+# The public repo ships pure source code only — no build system glue,
+# no CI/release workflows, no IDE settings, and no compiled artefacts.
+# ---------------------------------------------------------------------------
+
+# CI / release workflows
+.github/                    export-ignore
+
+# CMake build system
+CMakeLists.txt              export-ignore
+cmake/                      export-ignore
+
+# Android build system (Gradle wrapper, build scripts, ProGuard)
+android/build.gradle        export-ignore
+android/settings.gradle     export-ignore
+android/gradle.properties   export-ignore
+android/gradle/             export-ignore
+android/gradlew             export-ignore
+android/gradlew.bat         export-ignore
+android/build_debug.ps1     export-ignore
+android/proguard-rules.pro  export-ignore
+
+# Local deployment / release scripts
+scripts/                    export-ignore
+
+# IDE configuration
+.vscode/                    export-ignore
+
+# Upstream reference submodules (reference-only; not part of the distributable)
+amiberry-upstream/          export-ignore
+winuae-upstream/            export-ignore
+
+# Git infrastructure files not needed in the exported tree
+.gitmodules                 export-ignore

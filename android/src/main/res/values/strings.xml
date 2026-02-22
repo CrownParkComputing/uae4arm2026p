@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">UAE4ARM+_2026</string>
+    
+    <!-- Walkthrough Wizard -->
+    <string name="walkthrough_welcome_title">Welcome to UAE4ARM+ 2026</string>
+    <string name="walkthrough_welcome_desc">This wizard will help you set up your Amiga emulator.\n\nYou\'ll need:\n• A Kickstart ROM\n• Disk images or WHDLoad games\n\nThis should take about 2 minutes.</string>
+    
+    <string name="walkthrough_model_title">Choose Your Amiga Model</string>
+    <string name="walkthrough_model_desc">Select the Amiga model you want to use. You can change this later.</string>
+    
+    <string name="walkthrough_kickstart_title">Kickstart ROM Setup</string>
+    <string name="walkthrough_kickstart_desc">The Amiga needs a Kickstart ROM (system BIOS) to boot.</string>
+    
+    <string name="walkthrough_disks_title">Disk Images</string>
+    <string name="walkthrough_disks_desc">Add your games and programs.</string>
+    
+    <string name="walkthrough_paths_title">Storage Paths</string>
+    <string name="walkthrough_paths_desc">Where your files are stored.</string>
+    
+    <string name="walkthrough_complete_title">Setup Complete!</string>
+    <string name="walkthrough_complete_desc">You\'re ready to start using UAE4ARM+.</string>
+    
+    <string name="walkthrough_skip">Skip</string>
+    <string name="walkthrough_back">Back</string>
+    <string name="walkthrough_next">Next</string>
+    <string name="walkthrough_start">Start</string>
+    
+    <string name="walkthrough_skip_title">Skip Setup?</string>
+    <string name="walkthrough_skip_message">Are you sure you want to skip the setup wizard?\n\nYou can run it again from Settings.</string>
+    <string name="walkthrough_skip_yes">Skip Anyway</string>
+    <string name="walkthrough_skip_no">Continue Setup</string>
+</resources>

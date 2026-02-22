@@ -1,0 +1,1723 @@
+#include <cstdio>
+#include <cstdlib>
+#include <SDL.h>
+#include <SDL_image.h>
+
+#ifdef USE_OPENGL
+#include "gl_platform.h"
+#endif
+
+#include "vkbd.h"
+#include "keyboard.h"
+#include "sysdeps.h"
+#include "uae.h"
+#include "amiberry_gfx.h"
+
+#include <map>
+#include <vector>
+#include <set>
+#include <chrono>
+
+using VkbdRect = struct
+{
+	SDL_Rect rect;
+	int up, down, left, right;
+	int key;
+};
+
+// Configurable options
+static bool vkbdHires = true;
+static VkbdLanguage vkbdLanguage = VKBD_LANGUAGE_US;
+static VkbdStyle vkbdStyle = VKBD_STYLE_ORIG;
+static double vkbdTransparency = 0.0;
+static int vkbdAlpha = 255;
+static double vkbdSlideDurationInSeconds = 1.0;
+static bool vkbdKeyboardHasExitButton = true;
+
+// All directions:
+const std::vector<int> vkbdDirections{VKBD_UP, VKBD_DOWN, VKBD_LEFT, VKBD_RIGHT};
+
+// Boolean that determines if keyboard is shown.
+static bool vkbdShow = false;
+
+// Time when button was pressed to show virtual keyboard.
+static std::chrono::time_point<std::chrono::system_clock> vkbdTimeLastRedraw;
+
+// Initialized in vkbd_init.
+static std::map<int, int> vkbdStickyKeyToIndex;
+static std::set<int> vkbdPressedStickyKeys;
+static std::set<int> vkbdStickyKeys;
+#ifdef USE_OPENGL
+// GL textures for keyboard rendering
+static GLuint vkbdGLTexture = 0;
+static GLuint vkbdGLTextureShift = 0;
+static int vkbdGLTexWidth = 0;
+static int vkbdGLTexHeight = 0;
+// GL shader resources (simple textured quad with alpha)
+static GLuint vkbd_gl_program = 0;
+static GLint vkbd_gl_tex_loc = -1;
+static GLint vkbd_gl_alpha_loc = -1;
+static GLint vkbd_gl_color_loc = -1;
+static GLint vkbd_gl_mode_loc = -1;
+static GLuint vkbd_gl_vao = 0;
+static GLuint vkbd_gl_vbo = 0;
+// Keep surfaces around for GL texture upload
+static SDL_Surface* vkbdSurface = nullptr;
+static SDL_Surface* vkbdSurfaceShift = nullptr;
+// Coordinate space dimensions used by position system (for scaling to drawable)
+static int vkbdPositionSpaceW = 0;
+static int vkbdPositionSpaceH = 0;
+#else
+static SDL_Texture* vkbdTexture = nullptr;
+static SDL_Texture* vkbdTextureShift = nullptr;
+#endif
+
+static VkbdRect* vkbdRect;
+
+// Acutal index in current t_vkbdRect
+static int vkbdActualIndex = 0;
+
+// If actual key is pressed.
+static bool vkbdActualPressed = false;
+
+// Mask indicating previous event. It's a mask consisting of VKBD_UP, VKBD_DOWN, VKBD_LEFT, VKBD_RIGHT and VKBD_BUTTON
+static int vkbdPreviousState = 0;
+
+// Color that is used to color pressed keys.
+static SDL_Color vkbdPressedKeyColor;
+
+// Where the keyboard is currently drawn:
+static int vkbdCurrentX;
+static int vkbdCurrentY;
+
+// Where the keyboard is drawn when it is finished sliding:
+static int vkbdEndX;
+static int vkbdEndY;
+
+// Where the keyboard is drawn when is it starts sliding in:
+static int vkbdStartX;
+static int vkbdStartY;
+
+// Following data is used to modify vkbdRect in case an exit button is provided on the keyboard.
+// This provides the data for the exit button.
+static VkbdRect vkbdExitButtonRect;
+
+// This is used as index for the exit button:
+static constexpr int vkbdExitButtonIndex = -1;
+
+// These are other keys from which you can move into the exit button:
+const std::vector<std::pair<int, int>> vkbdExitButtonConnections{
+	std::make_pair(AK_ESC, VKBD_LEFT),
+	std::make_pair(AK_BACKQUOTE, VKBD_LEFT),
+	std::make_pair(AK_TAB, VKBD_LEFT),
+	std::make_pair(AK_CTRL, VKBD_LEFT),
+	std::make_pair(AK_LSH, VKBD_LEFT),
+	std::make_pair(AK_LALT, VKBD_LEFT),
+	std::make_pair(AK_NPMUL, VKBD_RIGHT),
+	std::make_pair(AK_NPSUB, VKBD_RIGHT),
+	std::make_pair(AK_NPADD, VKBD_RIGHT),
+	std::make_pair(AK_ENT, VKBD_RIGHT)
+};
+
+//This is the new US keyboard, based directly on amiga-side keys
+//last four numbers: next keys in up,down,left,right directions
+static VkbdRect vkbdRectUS[] =
+{
+	{{1, 1, 29, 11}, 85, 17, 16, 1, AK_ESC}, // 0, row 1 start 
+	{{31, 1, 14, 11}, 86, 18, 0, 2, AK_F1}, // 1
+	{{46, 1, 14, 11}, 87, 19, 1, 3, AK_F2}, // 2
+	{{61, 1, 14, 11}, 87, 20, 2, 4, AK_F3}, // 3
+	{{76, 1, 14, 11}, 87, 21, 3, 5, AK_F4}, // 4
+	{{91, 1, 14, 11}, 87, 22, 4, 6, AK_F5}, // 5 
+	{{106, 1, 14, 11}, 87, 23, 5, 7, AK_F6}, // 6
+	{{121, 1, 14, 11}, 87, 24, 6, 8, AK_F7}, // 7 
+	{{136, 1, 14, 11}, 87, 25, 7, 9, AK_F8}, // 8 
+	{{151, 1, 14, 11}, 87, 26, 8, 10, AK_F9}, // 9
+	{{166, 1, 14, 11}, 87, 27, 9, 11, AK_F10}, // 10
+	{{181, 1, 29, 11}, 88, 28, 10, 12, AK_DEL}, // 11
+	{{211, 1, 29, 11}, 90, 30, 11, 13, AK_HELP}, // 12
+	{{241, 1, 14, 11}, 92, 32, 12, 14, AK_NPLPAREN}, // 13
+	{{256, 1, 14, 11}, 69, 33, 13, 15, AK_NPRPAREN}, // 14
+	{{271, 1, 14, 11}, 69, 34, 14, 16, AK_NPDIV}, // 15
+	{{286, 1, 14, 11}, 69, 35, 15, 0, AK_NPMUL}, // 16
+
+	{{1, 13, 29, 11}, 0, 36, 35, 18, AK_BACKQUOTE}, // 17, row 2 start 
+	{{31, 13, 14, 11}, 1, 37, 17, 19, AK_1}, // 18
+	{{46, 13, 14, 11}, 2, 38, 18, 20, AK_2}, // 19
+	{{61, 13, 14, 11}, 3, 39, 19, 21, AK_3}, // 20
+	{{76, 13, 14, 11}, 4, 40, 20, 22, AK_4}, // 21
+	{{91, 13, 14, 11}, 5, 41, 21, 23, AK_5}, // 22
+	{{106, 13, 14, 11}, 6, 42, 22, 24, AK_6}, // 23
+	{{121, 13, 14, 11}, 7, 43, 23, 25, AK_7}, // 24 
+	{{136, 13, 14, 11}, 8, 44, 24, 26, AK_8}, // 25
+	{{151, 13, 14, 11}, 9, 45, 25, 27, AK_9}, // 26
+	{{166, 13, 14, 11}, 10, 46, 26, 28, AK_0}, // 27
+	{{181, 13, 14, 11}, 11, 47, 27, 29, AK_MINUS}, // 28
+	{{196, 13, 14, 11}, 11, 48, 28, 30, AK_EQUAL}, // 29
+	{{211, 13, 14, 11}, 12, 49, 29, 31, AK_BACKSLASH}, // 30
+	{{226, 13, 14, 11}, 12, 49, 30, 32, AK_BS}, // 31
+	{{241, 13, 14, 11}, 13, 50, 31, 33, AK_NP7}, // 32
+	{{256, 13, 14, 11}, 14, 51, 32, 34, AK_NP8}, // 33
+	{{271, 13, 14, 11}, 15, 52, 33, 35, AK_NP9}, // 34
+	{{286, 13, 14, 11}, 16, 53, 34, 17, AK_NPSUB}, // 35
+
+	{{1, 25, 29, 11}, 17, 54, 53, 37, AK_TAB}, // 36, row 3 start 
+	{{31, 25, 14, 11}, 18, 55, 36, 38, AK_Q}, // 37
+	{{46, 25, 14, 11}, 19, 56, 37, 39, AK_W}, // 38
+	{{61, 25, 14, 11}, 20, 57, 38, 40, AK_E}, // 39
+	{{76, 25, 14, 11}, 21, 58, 39, 41, AK_R}, // 40
+	{{91, 25, 14, 11}, 22, 59, 40, 42, AK_T}, // 41
+	{{106, 25, 14, 11}, 23, 60, 41, 43, AK_Y}, // 42
+	{{121, 25, 14, 11}, 24, 61, 42, 44, AK_U}, // 43 
+	{{136, 25, 14, 11}, 25, 62, 43, 45, AK_I}, // 44
+	{{151, 25, 14, 11}, 26, 63, 44, 46, AK_O}, // 45
+	{{166, 25, 14, 11}, 27, 64, 45, 47, AK_P}, // 46
+	{{181, 25, 14, 11}, 28, 65, 46, 48, AK_LBRACKET}, // 47
+	{{196, 25, 14, 11}, 29, 49, 47, 49, AK_RBRACKET}, // 48
+	{{211, 25, 29, 23}, 30, 81, 48, 50, AK_RET}, // 49
+	{{241, 25, 14, 11}, 32, 66, 49, 51, AK_NP4}, // 50
+	{{256, 25, 14, 11}, 33, 67, 50, 52, AK_NP5}, // 51
+	{{271, 25, 14, 11}, 34, 68, 51, 53, AK_NP6}, // 52
+	{{286, 25, 14, 11}, 35, 69, 52, 36, AK_NPADD}, // 53
+
+	{{1, 37, 29, 11}, 36, 70, 69, 55, AK_CTRL}, // 54, row 4 start 
+	{{31, 37, 14, 11}, 37, 70, 54, 56, AK_A}, // 55
+	{{46, 37, 14, 11}, 38, 71, 55, 57, AK_S}, // 56
+	{{61, 37, 14, 11}, 39, 72, 56, 58, AK_D}, // 57
+	{{76, 37, 14, 11}, 40, 73, 57, 59, AK_F}, // 58
+	{{91, 37, 14, 11}, 41, 74, 58, 60, AK_G}, // 59
+	{{106, 37, 14, 11}, 42, 75, 59, 61, AK_H}, // 60
+	{{121, 37, 14, 11}, 43, 76, 60, 62, AK_J}, // 61 
+	{{136, 37, 14, 11}, 44, 77, 61, 63, AK_K}, // 62
+	{{151, 37, 14, 11}, 45, 78, 62, 64, AK_L}, // 63
+	{{166, 37, 14, 11}, 46, 79, 63, 65, AK_SEMICOLON}, // 64
+	{{181, 37, 14, 11}, 47, 80, 64, 49, AK_QUOTE}, // 65
+	{{241, 37, 14, 11}, 50, 83, 49, 67, AK_NP1}, // 66
+	{{256, 37, 14, 11}, 51, 83, 66, 68, AK_NP2}, // 67
+	{{271, 37, 14, 11}, 52, 84, 67, 69, AK_NP3}, // 68
+	{{286, 37, 14, 34}, 53, 16, 68, 54, AK_ENT}, // 69
+
+	{{1, 49, 44, 11}, 54, 85, 84, 71, AK_LSH}, // 70, row 5 start 
+	{{46, 49, 14, 11}, 56, 87, 70, 72, AK_Z}, // 71
+	{{61, 49, 14, 11}, 57, 87, 71, 73, AK_X}, // 72
+	{{76, 49, 14, 11}, 58, 87, 72, 74, AK_C}, // 73
+	{{91, 49, 14, 11}, 59, 87, 73, 75, AK_V}, // 74
+	{{106, 49, 14, 11}, 60, 87, 74, 76, AK_B}, // 75
+	{{121, 49, 14, 11}, 61, 87, 75, 77, AK_N}, // 76 
+	{{136, 49, 14, 11}, 62, 87, 76, 78, AK_M}, // 77
+	{{151, 49, 14, 11}, 63, 87, 77, 79, AK_COMMA}, // 78
+	{{166, 49, 14, 11}, 64, 87, 78, 80, AK_PERIOD}, // 79
+	{{181, 49, 14, 11}, 65, 88, 79, 81, AK_SLASH}, // 80
+	{{196, 49, 29, 11}, 49, 89, 80, 82, AK_RSH}, // 81
+	{{226, 49, 14, 11}, 49, 91, 81, 83, AK_UP}, // 82
+	{{241, 49, 29, 11}, 66, 92, 82, 84, AK_NP0}, // 83
+	{{271, 49, 14, 11}, 67, 69, 83, 69, AK_NPDEL}, // 84
+
+	{{1, 61, 29, 11}, 70, 0, 69, 86, AK_LALT}, // 85, row 6 start 
+	{{31, 61, 14, 11}, 70, 1, 85, 87, AK_LAMI}, // 86
+	{{46, 61, 134, 11}, 71, 2, 86, 88, AK_SPC}, // 87
+	{{181, 61, 14, 11}, 80, 11, 87, 89, AK_RAMI}, // 88
+	{{196, 61, 14, 11}, 81, 11, 88, 90, AK_RALT}, // 89
+	{{211, 61, 14, 11}, 81, 12, 89, 91, AK_LF}, // 90
+	{{226, 61, 14, 11}, 82, 12, 90, 92, AK_DN}, // 91 
+	{{241, 61, 14, 11}, 83, 13, 91, 69, AK_RT}, // 92
+};
+
+//UK KEYBOARD
+static VkbdRect vkbdRectUK[] =
+{
+	{{1, 1, 29, 11}, 85, 17, 16, 1, AK_ESC}, // 0, row 1 start 
+	{{31, 1, 14, 11}, 86, 18, 0, 2, AK_F1}, // 1
+	{{46, 1, 14, 11}, 87, 19, 1, 3, AK_F2}, // 2
+	{{61, 1, 14, 11}, 87, 20, 2, 4, AK_F3}, // 3
+	{{76, 1, 14, 11}, 87, 21, 3, 5, AK_F4}, // 4
+	{{91, 1, 14, 11}, 87, 22, 4, 6, AK_F5}, // 5 
+	{{106, 1, 14, 11}, 87, 23, 5, 7, AK_F6}, // 6
+	{{121, 1, 14, 11}, 87, 24, 6, 8, AK_F7}, // 7 
+	{{136, 1, 14, 11}, 87, 25, 7, 9, AK_F8}, // 8 
+	{{151, 1, 14, 11}, 87, 26, 8, 10, AK_F9}, // 9
+	{{166, 1, 14, 11}, 87, 27, 9, 11, AK_F10}, // 10
+	{{181, 1, 29, 11}, 88, 28, 10, 12, AK_DEL}, // 11
+	{{211, 1, 29, 11}, 90, 30, 11, 13, AK_HELP}, // 12
+	{{241, 1, 14, 11}, 92, 32, 12, 14, AK_NPLPAREN}, // 13
+	{{256, 1, 14, 11}, 69, 33, 13, 15, AK_NPRPAREN}, // 14
+	{{271, 1, 14, 11}, 69, 34, 14, 16, AK_NPDIV}, // 15
+	{{286, 1, 14, 11}, 69, 35, 15, 0, AK_NPMUL}, // 16
+
+	{{1, 13, 29, 11}, 0, 36, 35, 18, AK_BACKQUOTE}, // 17, row 2 start 
+	{{31, 13, 14, 11}, 1, 37, 17, 19, AK_1}, // 18
+	{{46, 13, 14, 11}, 2, 38, 18, 20, AK_2}, // 19
+	{{61, 13, 14, 11}, 3, 39, 19, 21, AK_3}, // 20
+	{{76, 13, 14, 11}, 4, 40, 20, 22, AK_4}, // 21
+	{{91, 13, 14, 11}, 5, 41, 21, 23, AK_5}, // 22
+	{{106, 13, 14, 11}, 6, 42, 22, 24, AK_6}, // 23
+	{{121, 13, 14, 11}, 7, 43, 23, 25, AK_7}, // 24 
+	{{136, 13, 14, 11}, 8, 44, 24, 26, AK_8}, // 25
+	{{151, 13, 14, 11}, 9, 45, 25, 27, AK_9}, // 26
+	{{166, 13, 14, 11}, 10, 46, 26, 28, AK_0}, // 27
+	{{181, 13, 14, 11}, 11, 47, 27, 29, AK_MINUS}, // 28
+	{{196, 13, 14, 11}, 11, 48, 28, 30, AK_EQUAL}, // 29
+	{{211, 13, 14, 11}, 12, 49, 29, 31, AK_BACKSLASH}, // 30
+	{{226, 13, 14, 11}, 12, 49, 30, 32, AK_BS}, // 31
+	{{241, 13, 14, 11}, 13, 50, 31, 33, AK_NP7}, // 32
+	{{256, 13, 14, 11}, 14, 51, 32, 34, AK_NP8}, // 33
+	{{271, 13, 14, 11}, 15, 52, 33, 35, AK_NP9}, // 34
+	{{286, 13, 14, 11}, 16, 53, 34, 17, AK_NPSUB}, // 35
+
+	{{1, 25, 29, 11}, 17, 54, 53, 37, AK_TAB}, // 36, row 3 start 
+	{{31, 25, 14, 11}, 18, 55, 36, 38, AK_Q}, // 37
+	{{46, 25, 14, 11}, 19, 56, 37, 39, AK_W}, // 38
+	{{61, 25, 14, 11}, 20, 57, 38, 40, AK_E}, // 39
+	{{76, 25, 14, 11}, 21, 58, 39, 41, AK_R}, // 40
+	{{91, 25, 14, 11}, 22, 59, 40, 42, AK_T}, // 41
+	{{106, 25, 14, 11}, 23, 60, 41, 43, AK_Y}, // 42
+	{{121, 25, 14, 11}, 24, 61, 42, 44, AK_U}, // 43 
+	{{136, 25, 14, 11}, 25, 62, 43, 45, AK_I}, // 44
+	{{151, 25, 14, 11}, 26, 63, 44, 46, AK_O}, // 45
+	{{166, 25, 14, 11}, 27, 64, 45, 47, AK_P}, // 46
+	{{181, 25, 14, 11}, 28, 65, 46, 48, AK_LBRACKET}, // 47
+	{{196, 25, 14, 11}, 29, 49, 47, 49, AK_RBRACKET}, // 48
+	{{211, 25, 29, 23}, 30, 81, 48, 50, AK_RET}, // 49
+	{{241, 25, 14, 11}, 32, 66, 49, 51, AK_NP4}, // 50
+	{{256, 25, 14, 11}, 33, 67, 50, 52, AK_NP5}, // 51
+	{{271, 25, 14, 11}, 34, 68, 51, 53, AK_NP6}, // 52
+	{{286, 25, 14, 11}, 35, 69, 52, 36, AK_NPADD}, // 53
+
+	{{1, 37, 29, 11}, 36, 70, 69, 55, AK_CTRL}, // 54, row 4 start 
+	{{31, 37, 14, 11}, 37, 93, 54, 56, AK_A}, // 55 *
+	{{46, 37, 14, 11}, 38, 71, 55, 57, AK_S}, // 56
+	{{61, 37, 14, 11}, 39, 72, 56, 58, AK_D}, // 57
+	{{76, 37, 14, 11}, 40, 73, 57, 59, AK_F}, // 58
+	{{91, 37, 14, 11}, 41, 74, 58, 60, AK_G}, // 59
+	{{106, 37, 14, 11}, 42, 75, 59, 61, AK_H}, // 60
+	{{121, 37, 14, 11}, 43, 76, 60, 62, AK_J}, // 61 
+	{{136, 37, 14, 11}, 44, 77, 61, 63, AK_K}, // 62
+	{{151, 37, 14, 11}, 45, 78, 62, 64, AK_L}, // 63
+	{{166, 37, 14, 11}, 46, 79, 63, 65, AK_SEMICOLON}, // 64
+	{{181, 37, 14, 11}, 47, 80, 64, 49, AK_QUOTE}, // 65
+	{{241, 37, 14, 11}, 50, 83, 49, 67, AK_NP1}, // 66
+	{{256, 37, 14, 11}, 51, 83, 66, 68, AK_NP2}, // 67
+	{{271, 37, 14, 11}, 52, 84, 67, 69, AK_NP3}, // 68
+	{{286, 37, 14, 34}, 53, 16, 68, 54, AK_ENT}, // 69
+
+	{{1, 49, 29, 11}, 54, 85, 84, 93, AK_LSH}, // 70, row 5 start * 
+	{{46, 49, 14, 11}, 56, 87, 93, 72, AK_Z}, // 71 *
+	{{61, 49, 14, 11}, 57, 87, 71, 73, AK_X}, // 72
+	{{76, 49, 14, 11}, 58, 87, 72, 74, AK_C}, // 73
+	{{91, 49, 14, 11}, 59, 87, 73, 75, AK_V}, // 74
+	{{106, 49, 14, 11}, 60, 87, 74, 76, AK_B}, // 75
+	{{121, 49, 14, 11}, 61, 87, 75, 77, AK_N}, // 76 
+	{{136, 49, 14, 11}, 62, 87, 76, 78, AK_M}, // 77
+	{{151, 49, 14, 11}, 63, 87, 77, 79, AK_COMMA}, // 78
+	{{166, 49, 14, 11}, 64, 87, 78, 80, AK_PERIOD}, // 79
+	{{181, 49, 14, 11}, 65, 88, 79, 81, AK_SLASH}, // 80
+	{{196, 49, 29, 11}, 49, 89, 80, 82, AK_RSH}, // 81
+	{{226, 49, 14, 11}, 49, 91, 81, 83, AK_UP}, // 82
+	{{241, 49, 29, 11}, 66, 92, 82, 84, AK_NP0}, // 83
+	{{271, 49, 14, 11}, 67, 69, 83, 69, AK_NPDEL}, // 84
+
+	{{1, 61, 29, 11}, 70, 0, 69, 86, AK_LALT}, // 85, row 6 start 
+	{{31, 61, 14, 11}, 93, 1, 85, 87, AK_LAMI}, // 86 *
+	{{46, 61, 134, 11}, 71, 2, 86, 88, AK_SPC}, // 87
+	{{181, 61, 14, 11}, 80, 11, 87, 89, AK_RAMI}, // 88
+	{{196, 61, 14, 11}, 81, 11, 88, 90, AK_RALT}, // 89
+	{{211, 61, 14, 11}, 81, 12, 89, 91, AK_LF}, // 90
+	{{226, 61, 14, 11}, 82, 12, 90, 92, AK_DN}, // 91 
+	{{241, 61, 14, 11}, 83, 13, 91, 69, AK_RT}, // 92
+	// UK extra keys
+	{{31, 49, 14, 11}, 55, 86, 70, 71, AK_LTGT}, // 93	*
+};
+
+//GERMAN KEYBOARD
+static VkbdRect vkbdRectGER[] =
+{
+	{{1, 1, 29, 11}, 85, 17, 16, 1, AK_ESC}, // 0, row 1 start 
+	{{31, 1, 14, 11}, 86, 18, 0, 2, AK_F1}, // 1
+	{{46, 1, 14, 11}, 87, 19, 1, 3, AK_F2}, // 2
+	{{61, 1, 14, 11}, 87, 20, 2, 4, AK_F3}, // 3
+	{{76, 1, 14, 11}, 87, 21, 3, 5, AK_F4}, // 4
+	{{91, 1, 14, 11}, 87, 22, 4, 6, AK_F5}, // 5 
+	{{106, 1, 14, 11}, 87, 23, 5, 7, AK_F6}, // 6
+	{{121, 1, 14, 11}, 87, 24, 6, 8, AK_F7}, // 7 
+	{{136, 1, 14, 11}, 87, 25, 7, 9, AK_F8}, // 8 
+	{{151, 1, 14, 11}, 87, 26, 8, 10, AK_F9}, // 9
+	{{166, 1, 14, 11}, 87, 27, 9, 11, AK_F10}, // 10
+	{{181, 1, 29, 11}, 88, 28, 10, 12, AK_DEL}, // 11
+	{{211, 1, 29, 11}, 90, 30, 11, 13, AK_HELP}, // 12
+	{{241, 1, 14, 11}, 92, 32, 12, 14, AK_NPLPAREN}, // 13
+	{{256, 1, 14, 11}, 69, 33, 13, 15, AK_NPRPAREN}, // 14
+	{{271, 1, 14, 11}, 69, 34, 14, 16, AK_NPDIV}, // 15
+	{{286, 1, 14, 11}, 69, 35, 15, 0, AK_NPMUL}, // 16
+
+	{{1, 13, 29, 11}, 0, 36, 35, 18, AK_BACKQUOTE}, // 17, row 2 start 
+	{{31, 13, 14, 11}, 1, 37, 17, 19, AK_1}, // 18
+	{{46, 13, 14, 11}, 2, 38, 18, 20, AK_2}, // 19
+	{{61, 13, 14, 11}, 3, 39, 19, 21, AK_3}, // 20
+	{{76, 13, 14, 11}, 4, 40, 20, 22, AK_4}, // 21
+	{{91, 13, 14, 11}, 5, 41, 21, 23, AK_5}, // 22
+	{{106, 13, 14, 11}, 6, 42, 22, 24, AK_6}, // 23
+	{{121, 13, 14, 11}, 7, 43, 23, 25, AK_7}, // 24 
+	{{136, 13, 14, 11}, 8, 44, 24, 26, AK_8}, // 25
+	{{151, 13, 14, 11}, 9, 45, 25, 27, AK_9}, // 26
+	{{166, 13, 14, 11}, 10, 46, 26, 28, AK_0}, // 27
+	{{181, 13, 14, 11}, 11, 47, 27, 29, AK_MINUS}, // 28
+	{{196, 13, 14, 11}, 11, 48, 28, 30, AK_EQUAL}, // 29
+	{{211, 13, 14, 11}, 12, 49, 29, 31, AK_BACKSLASH}, // 30
+	{{226, 13, 14, 11}, 12, 49, 30, 32, AK_BS}, // 31
+	{{241, 13, 14, 11}, 13, 50, 31, 33, AK_NP7}, // 32
+	{{256, 13, 14, 11}, 14, 51, 32, 34, AK_NP8}, // 33
+	{{271, 13, 14, 11}, 15, 52, 33, 35, AK_NP9}, // 34
+	{{286, 13, 14, 11}, 16, 53, 34, 17, AK_NPSUB}, // 35
+
+	{{1, 25, 29, 11}, 17, 54, 53, 37, AK_TAB}, // 36, row 3 start 
+	{{31, 25, 14, 11}, 18, 55, 36, 38, AK_Q}, // 37
+	{{46, 25, 14, 11}, 19, 56, 37, 39, AK_W}, // 38
+	{{61, 25, 14, 11}, 20, 57, 38, 40, AK_E}, // 39
+	{{76, 25, 14, 11}, 21, 58, 39, 41, AK_R}, // 40
+	{{91, 25, 14, 11}, 22, 59, 40, 42, AK_T}, // 41
+	{{106, 25, 14, 11}, 23, 60, 41, 43, AK_Y}, // 42
+	{{121, 25, 14, 11}, 24, 61, 42, 44, AK_U}, // 43 
+	{{136, 25, 14, 11}, 25, 62, 43, 45, AK_I}, // 44
+	{{151, 25, 14, 11}, 26, 63, 44, 46, AK_O}, // 45
+	{{166, 25, 14, 11}, 27, 64, 45, 47, AK_P}, // 46
+	{{181, 25, 14, 11}, 28, 65, 46, 48, AK_LBRACKET}, // 47
+	{{196, 25, 14, 11}, 29, 94, 47, 49, AK_RBRACKET}, // 48 *
+	{{211, 25, 29, 23}, 30, 81, 48, 50, AK_RET}, // 49
+	{{241, 25, 14, 11}, 32, 66, 49, 51, AK_NP4}, // 50
+	{{256, 25, 14, 11}, 33, 67, 50, 52, AK_NP5}, // 51
+	{{271, 25, 14, 11}, 34, 68, 51, 53, AK_NP6}, // 52
+	{{286, 25, 14, 11}, 35, 69, 52, 36, AK_NPADD}, // 53
+
+	{{1, 37, 29, 11}, 36, 70, 69, 55, AK_CTRL}, // 54, row 4 start 
+	{{31, 37, 14, 11}, 37, 93, 54, 56, AK_A}, // 55 *
+	{{46, 37, 14, 11}, 38, 71, 55, 57, AK_S}, // 56
+	{{61, 37, 14, 11}, 39, 72, 56, 58, AK_D}, // 57
+	{{76, 37, 14, 11}, 40, 73, 57, 59, AK_F}, // 58
+	{{91, 37, 14, 11}, 41, 74, 58, 60, AK_G}, // 59
+	{{106, 37, 14, 11}, 42, 75, 59, 61, AK_H}, // 60
+	{{121, 37, 14, 11}, 43, 76, 60, 62, AK_J}, // 61 
+	{{136, 37, 14, 11}, 44, 77, 61, 63, AK_K}, // 62
+	{{151, 37, 14, 11}, 45, 78, 62, 64, AK_L}, // 63
+	{{166, 37, 14, 11}, 46, 79, 63, 65, AK_SEMICOLON}, // 64
+	{{181, 37, 14, 11}, 47, 80, 64, 94, AK_QUOTE}, // 65 *
+	{{241, 37, 14, 11}, 50, 83, 49, 67, AK_NP1}, // 66
+	{{256, 37, 14, 11}, 51, 83, 66, 68, AK_NP2}, // 67
+	{{271, 37, 14, 11}, 52, 84, 67, 69, AK_NP3}, // 68
+	{{286, 37, 14, 34}, 53, 16, 68, 54, AK_ENT}, // 69
+
+	{{1, 49, 29, 11}, 54, 85, 84, 93, AK_LSH}, // 70, row 5 start * 
+	{{46, 49, 14, 11}, 56, 87, 93, 72, AK_Z}, // 71 *
+	{{61, 49, 14, 11}, 57, 87, 71, 73, AK_X}, // 72
+	{{76, 49, 14, 11}, 58, 87, 72, 74, AK_C}, // 73
+	{{91, 49, 14, 11}, 59, 87, 73, 75, AK_V}, // 74
+	{{106, 49, 14, 11}, 60, 87, 74, 76, AK_B}, // 75
+	{{121, 49, 14, 11}, 61, 87, 75, 77, AK_N}, // 76 
+	{{136, 49, 14, 11}, 62, 87, 76, 78, AK_M}, // 77
+	{{151, 49, 14, 11}, 63, 87, 77, 79, AK_COMMA}, // 78
+	{{166, 49, 14, 11}, 64, 87, 78, 80, AK_PERIOD}, // 79
+	{{181, 49, 14, 11}, 65, 88, 79, 81, AK_SLASH}, // 80
+	{{196, 49, 29, 11}, 49, 89, 80, 82, AK_RSH}, // 81
+	{{226, 49, 14, 11}, 49, 91, 81, 83, AK_UP}, // 82
+	{{241, 49, 29, 11}, 66, 92, 82, 84, AK_NP0}, // 83
+	{{271, 49, 14, 11}, 67, 69, 83, 69, AK_NPDEL}, // 84
+
+	{{1, 61, 29, 11}, 70, 0, 69, 86, AK_LALT}, // 85, row 6 start 
+	{{31, 61, 14, 11}, 93, 1, 85, 87, AK_LAMI}, // 86 *
+	{{46, 61, 134, 11}, 71, 2, 86, 88, AK_SPC}, // 87
+	{{181, 61, 14, 11}, 80, 11, 87, 89, AK_RAMI}, // 88
+	{{196, 61, 14, 11}, 81, 11, 88, 90, AK_RALT}, // 89
+	{{211, 61, 14, 11}, 81, 12, 89, 91, AK_LF}, // 90
+	{{226, 61, 14, 11}, 82, 12, 90, 92, AK_DN}, // 91 
+	{{241, 61, 14, 11}, 83, 13, 91, 69, AK_RT}, // 92	
+	//German extra keys
+	{{31, 49, 14, 11}, 55, 86, 70, 71, AK_LTGT}, // 93	*
+	{{196, 37, 14, 11}, 48, 81, 65, 49, AK_NUMBERSIGN}, // 94 *	
+};
+
+//FRENCH KEYBOARD
+static VkbdRect vkbdRectFR[] =
+{
+	{{1, 1, 29, 11}, 85, 17, 16, 1, AK_ESC}, // 0, row 1 start 
+	{{31, 1, 14, 11}, 86, 18, 0, 2, AK_F1}, // 1
+	{{46, 1, 14, 11}, 87, 19, 1, 3, AK_F2}, // 2
+	{{61, 1, 14, 11}, 87, 20, 2, 4, AK_F3}, // 3
+	{{76, 1, 14, 11}, 87, 21, 3, 5, AK_F4}, // 4
+	{{91, 1, 14, 11}, 87, 22, 4, 6, AK_F5}, // 5 
+	{{106, 1, 14, 11}, 87, 23, 5, 7, AK_F6}, // 6
+	{{121, 1, 14, 11}, 87, 24, 6, 8, AK_F7}, // 7 
+	{{136, 1, 14, 11}, 87, 25, 7, 9, AK_F8}, // 8 
+	{{151, 1, 14, 11}, 87, 26, 8, 10, AK_F9}, // 9
+	{{166, 1, 14, 11}, 87, 27, 9, 11, AK_F10}, // 10
+	{{181, 1, 29, 11}, 88, 28, 10, 12, AK_DEL}, // 11
+	{{211, 1, 29, 11}, 90, 30, 11, 13, AK_HELP}, // 12
+	{{241, 1, 14, 11}, 92, 32, 12, 14, AK_NPLPAREN}, // 13
+	{{256, 1, 14, 11}, 69, 33, 13, 15, AK_NPRPAREN}, // 14
+	{{271, 1, 14, 11}, 69, 34, 14, 16, AK_NPDIV}, // 15
+	{{286, 1, 14, 11}, 69, 35, 15, 0, AK_NPMUL}, // 16
+
+	{{1, 13, 29, 11}, 0, 36, 35, 18, AK_BACKQUOTE}, // 17, row 2 start 
+	{{31, 13, 14, 11}, 1, 37, 17, 19, AK_1}, // 18
+	{{46, 13, 14, 11}, 2, 38, 18, 20, AK_2}, // 19
+	{{61, 13, 14, 11}, 3, 39, 19, 21, AK_3}, // 20
+	{{76, 13, 14, 11}, 4, 40, 20, 22, AK_4}, // 21
+	{{91, 13, 14, 11}, 5, 41, 21, 23, AK_5}, // 22
+	{{106, 13, 14, 11}, 6, 42, 22, 24, AK_6}, // 23
+	{{121, 13, 14, 11}, 7, 43, 23, 25, AK_7}, // 24 
+	{{136, 13, 14, 11}, 8, 44, 24, 26, AK_8}, // 25
+	{{151, 13, 14, 11}, 9, 45, 25, 27, AK_9}, // 26
+	{{166, 13, 14, 11}, 10, 46, 26, 28, AK_0}, // 27
+	{{181, 13, 14, 11}, 11, 47, 27, 29, AK_MINUS}, // 28
+	{{196, 13, 14, 11}, 11, 48, 28, 30, AK_EQUAL}, // 29
+	{{211, 13, 14, 11}, 12, 49, 29, 31, AK_BACKSLASH}, // 30
+	{{226, 13, 14, 11}, 12, 49, 30, 32, AK_BS}, // 31
+	{{241, 13, 14, 11}, 13, 50, 31, 33, AK_NP7}, // 32
+	{{256, 13, 14, 11}, 14, 51, 32, 34, AK_NP8}, // 33
+	{{271, 13, 14, 11}, 15, 52, 33, 35, AK_NP9}, // 34
+	{{286, 13, 14, 11}, 16, 53, 34, 17, AK_NPSUB}, // 35
+
+	{{1, 25, 29, 11}, 17, 54, 53, 37, AK_TAB}, // 36, row 3 start 
+	{{31, 25, 14, 11}, 18, 55, 36, 38, AK_Q}, // 37
+	{{46, 25, 14, 11}, 19, 56, 37, 39, AK_W}, // 38
+	{{61, 25, 14, 11}, 20, 57, 38, 40, AK_E}, // 39
+	{{76, 25, 14, 11}, 21, 58, 39, 41, AK_R}, // 40
+	{{91, 25, 14, 11}, 22, 59, 40, 42, AK_T}, // 41
+	{{106, 25, 14, 11}, 23, 60, 41, 43, AK_Y}, // 42
+	{{121, 25, 14, 11}, 24, 61, 42, 44, AK_U}, // 43 
+	{{136, 25, 14, 11}, 25, 62, 43, 45, AK_I}, // 44
+	{{151, 25, 14, 11}, 26, 63, 44, 46, AK_O}, // 45
+	{{166, 25, 14, 11}, 27, 64, 45, 47, AK_P}, // 46
+	{{181, 25, 14, 11}, 28, 65, 46, 48, AK_LBRACKET}, // 47
+	{{196, 25, 14, 11}, 29, 94, 47, 49, AK_RBRACKET}, // 48 *
+	{{211, 25, 29, 23}, 30, 81, 48, 50, AK_RET}, // 49
+	{{241, 25, 14, 11}, 32, 66, 49, 51, AK_NP4}, // 50
+	{{256, 25, 14, 11}, 33, 67, 50, 52, AK_NP5}, // 51
+	{{271, 25, 14, 11}, 34, 68, 51, 53, AK_NP6}, // 52
+	{{286, 25, 14, 11}, 35, 69, 52, 36, AK_NPADD}, // 53
+
+	{{1, 37, 29, 11}, 36, 70, 69, 55, AK_CTRL}, // 54, row 4 start 
+	{{31, 37, 14, 11}, 37, 93, 54, 56, AK_A}, // 55 *
+	{{46, 37, 14, 11}, 38, 71, 55, 57, AK_S}, // 56
+	{{61, 37, 14, 11}, 39, 72, 56, 58, AK_D}, // 57
+	{{76, 37, 14, 11}, 40, 73, 57, 59, AK_F}, // 58
+	{{91, 37, 14, 11}, 41, 74, 58, 60, AK_G}, // 59
+	{{106, 37, 14, 11}, 42, 75, 59, 61, AK_H}, // 60
+	{{121, 37, 14, 11}, 43, 76, 60, 62, AK_J}, // 61 
+	{{136, 37, 14, 11}, 44, 77, 61, 63, AK_K}, // 62
+	{{151, 37, 14, 11}, 45, 78, 62, 64, AK_L}, // 63
+	{{166, 37, 14, 11}, 46, 79, 63, 65, AK_SEMICOLON}, // 64
+	{{181, 37, 14, 11}, 47, 80, 64, 94, AK_QUOTE}, // 65 *
+	{{241, 37, 14, 11}, 50, 83, 49, 67, AK_NP1}, // 66
+	{{256, 37, 14, 11}, 51, 83, 66, 68, AK_NP2}, // 67
+	{{271, 37, 14, 11}, 52, 84, 67, 69, AK_NP3}, // 68
+	{{286, 37, 14, 34}, 53, 16, 68, 54, AK_ENT}, // 69
+
+	{{1, 49, 29, 11}, 54, 85, 84, 93, AK_LSH}, // 70, row 5 start * 
+	{{46, 49, 14, 11}, 56, 87, 93, 72, AK_Z}, // 71 *
+	{{61, 49, 14, 11}, 57, 87, 71, 73, AK_X}, // 72
+	{{76, 49, 14, 11}, 58, 87, 72, 74, AK_C}, // 73
+	{{91, 49, 14, 11}, 59, 87, 73, 75, AK_V}, // 74
+	{{106, 49, 14, 11}, 60, 87, 74, 76, AK_B}, // 75
+	{{121, 49, 14, 11}, 61, 87, 75, 77, AK_N}, // 76 
+	{{136, 49, 14, 11}, 62, 87, 76, 78, AK_M}, // 77
+	{{151, 49, 14, 11}, 63, 87, 77, 79, AK_COMMA}, // 78
+	{{166, 49, 14, 11}, 64, 87, 78, 80, AK_PERIOD}, // 79
+	{{181, 49, 14, 11}, 65, 88, 79, 81, AK_SLASH}, // 80
+	{{196, 49, 29, 11}, 49, 89, 80, 82, AK_RSH}, // 81
+	{{226, 49, 14, 11}, 49, 91, 81, 83, AK_UP}, // 82
+	{{241, 49, 29, 11}, 66, 92, 82, 84, AK_NP0}, // 83
+	{{271, 49, 14, 11}, 67, 69, 83, 69, AK_NPDEL}, // 84
+
+	{{1, 61, 29, 11}, 70, 0, 69, 86, AK_LALT}, // 85, row 6 start 
+	{{31, 61, 14, 11}, 93, 1, 85, 87, AK_LAMI}, // 86 *
+	{{46, 61, 134, 11}, 71, 2, 86, 88, AK_SPC}, // 87
+	{{181, 61, 14, 11}, 80, 11, 87, 89, AK_RAMI}, // 88
+	{{196, 61, 14, 11}, 81, 11, 88, 90, AK_RALT}, // 89
+	{{211, 61, 14, 11}, 81, 12, 89, 91, AK_LF}, // 90
+	{{226, 61, 14, 11}, 82, 12, 90, 92, AK_DN}, // 91 
+	{{241, 61, 14, 11}, 83, 13, 91, 69, AK_RT}, // 92	
+	//French extra keys
+	{{31, 49, 14, 11}, 55, 86, 70, 71, AK_LTGT}, // 93	*
+	{{196, 37, 14, 11}, 48, 81, 65, 49, AK_NUMBERSIGN}, // 94 *	
+};
+
+static std::string vkbd_get_style_string()
+{
+	std::string styleString;
+	switch (vkbdStyle)
+	{
+	case VKBD_STYLE_WARM:
+		styleString = "Warm";
+		break;
+	case VKBD_STYLE_COOL:
+		styleString = "Cool";
+		break;
+	case VKBD_STYLE_DARK:
+		styleString = "Dark";
+		break;
+	default:
+		styleString = "Orig";
+		break;
+	}
+	return styleString;
+}
+
+static std::string vkbd_get_language_string()
+{
+	std::string languageString;
+	switch (vkbdLanguage)
+	{
+	case VKBD_LANGUAGE_UK:
+		languageString = "UK";
+		break;
+	case VKBD_LANGUAGE_GER:
+		languageString = "Ger";
+		break;
+	case VKBD_LANGUAGE_FR:
+		languageString = "FR";
+		break;
+	default:
+		languageString = "US";
+		break;
+	}
+	return languageString;
+}
+
+static std::string vkbd_get_hires_string()
+{
+	return vkbdHires ? "Hires" : "";
+}
+
+static std::string vkbd_get_exit_button_filename()
+{
+	const std::string styleString = vkbd_get_style_string();
+	const std::string hiresString = vkbd_get_hires_string();
+
+	std::string fileName = get_data_path();
+	fileName += std::string("vkbd/vkbd");
+	fileName += styleString;
+	fileName += std::string("Quit");
+	fileName += hiresString;
+	fileName += std::string(".png");
+
+	return fileName;
+}
+
+static std::string vkbd_get_keyboard_filename(bool shift)
+{
+	const std::string styleString = vkbd_get_style_string();
+	const std::string languageString = vkbd_get_language_string();
+	const std::string hiresString = vkbd_get_hires_string();
+	const std::string shiftString = shift ? "Shift" : "";
+
+	std::string fileName = get_data_path();
+	fileName += std::string("vkbd/vkbd");
+	fileName += styleString;
+	fileName += languageString;
+	fileName += std::string("Large");
+	fileName += shiftString;
+	fileName += hiresString;
+	fileName += std::string(".png");
+
+	return fileName;
+}
+
+static SDL_Surface* vkbd_create_keyboard_surface(bool shift)
+{
+	const auto fileName = vkbd_get_keyboard_filename(shift);
+	const auto surf = IMG_Load(fileName.c_str());
+
+	if (surf == nullptr)
+	{
+		write_log(_T("Virtual Keyboard Bitmap Error: %s\n"), SDL_GetError());
+	}
+
+	return surf;
+}
+
+static SDL_Surface* vkbd_create_exit_button_surface()
+{
+	const auto fileName = vkbd_get_exit_button_filename();
+	const auto surf = IMG_Load(fileName.c_str());
+
+	if (surf == nullptr)
+	{
+		write_log(_T("Virtual Keyboard Bitmap Error: %s\n"), SDL_GetError());
+	}
+
+	return surf;
+}
+
+static SDL_Surface* vkbd_concat_surfaces(SDL_Surface* keyboard, SDL_Surface* exit)
+{
+	const int width = keyboard->w + exit->w;
+	const int height = std::max(keyboard->h, exit->h);
+	const auto surf = SDL_CreateRGBSurface(0, width, height, 32, 0, 0, 0, 0);
+	SDL_Rect srcRect;
+	srcRect.x = 0;
+	srcRect.y = 0;
+	srcRect.w = keyboard->w;
+	srcRect.h = keyboard->h;
+	SDL_Rect destRect;
+	destRect.x = 0;
+	destRect.y = 0;
+	destRect.w = keyboard->w;
+	destRect.h = keyboard->h;
+	SDL_BlitSurface(keyboard, &srcRect, surf, &destRect);
+	srcRect.x = 0;
+	srcRect.y = 0;
+	srcRect.w = exit->w;
+	srcRect.h = exit->h;
+	destRect.x = keyboard->w;
+	destRect.y = 0;
+	destRect.w = exit->w;
+	destRect.h = exit->h;
+	SDL_BlitSurface(exit, &srcRect, surf, &destRect);
+
+	return surf;
+}
+
+#ifdef USE_OPENGL
+// Vertex shader: passes position and texture coordinates through
+static const char* vkbd_vs_source =
+	"attribute vec4 pos;\n"
+	"varying vec2 uv;\n"
+	"void main() {\n"
+	"  gl_Position = vec4(pos.xy, 0.0, 1.0);\n"
+	"  uv = pos.zw;\n"
+	"}\n";
+
+// Fragment shader: mode 0 = textured quad with alpha, mode 1 = solid color
+static const char* vkbd_fs_source =
+	"varying vec2 uv;\n"
+	"uniform sampler2D tex0;\n"
+	"uniform float alpha;\n"
+	"uniform vec4 fillColor;\n"
+	"uniform int mode;\n"
+	"void main() {\n"
+	"  if (mode == 1) {\n"
+	"    gl_FragColor = fillColor;\n"
+	"  } else {\n"
+	"    vec4 c = texture2D(tex0, uv);\n"
+	"    gl_FragColor = vec4(c.rgb, c.a * alpha);\n"
+	"  }\n"
+	"}\n";
+
+static bool init_vkbd_gl_shader()
+{
+	if (vkbd_gl_program != 0 && glIsProgram(vkbd_gl_program)) return true;
+
+	vkbd_gl_program = 0;
+
+	const char* gl_ver_str = (const char*)glGetString(GL_VERSION);
+	bool is_gles = gl_ver_str && (strstr(gl_ver_str, "OpenGL ES") != nullptr);
+	int major = 0, minor = 0;
+	if (gl_ver_str) {
+		const char* v = gl_ver_str;
+		while (*v && (*v < '0' || *v > '9')) v++;
+		if (*v) {
+			major = atoi(v);
+			while (*v && *v != '.') v++;
+			if (*v == '.') { v++; minor = atoi(v); }
+		}
+	}
+
+	const char* vs_preamble = "#version 120\n";
+	const char* fs_preamble = "#version 120\n";
+
+	if (is_gles && major >= 3) {
+		vs_preamble = "#version 300 es\nprecision mediump float;\n#define attribute in\n#define varying out\n";
+		fs_preamble = "#version 300 es\nprecision mediump float;\nprecision mediump int;\n#define varying in\n#define texture2D texture\n#define gl_FragColor outFragColor\nout vec4 outFragColor;\n";
+	}
+	else if (!is_gles && (major > 3 || (major == 3 && minor >= 2))) {
+		vs_preamble = "#version 330 core\n#define attribute in\n#define varying out\n";
+		fs_preamble = "#version 330 core\nprecision mediump int;\n#define varying in\n#define texture2D texture\n#define gl_FragColor outFragColor\nout vec4 outFragColor;\n";
+	}
+
+	GLuint vsh = glCreateShader(GL_VERTEX_SHADER);
+	const char* vs_sources[] = { vs_preamble, vkbd_vs_source };
+	glShaderSource(vsh, 2, vs_sources, nullptr);
+	glCompileShader(vsh);
+
+	GLint compiled;
+	glGetShaderiv(vsh, GL_COMPILE_STATUS, &compiled);
+	if (!compiled) {
+		char log[512];
+		glGetShaderInfoLog(vsh, 512, nullptr, log);
+		write_log("VKBD GL vertex shader error: %s\n", log);
+		glDeleteShader(vsh);
+		return false;
+	}
+
+	GLuint fsh = glCreateShader(GL_FRAGMENT_SHADER);
+	const char* fs_sources[] = { fs_preamble, vkbd_fs_source };
+	glShaderSource(fsh, 2, fs_sources, nullptr);
+	glCompileShader(fsh);
+	glGetShaderiv(fsh, GL_COMPILE_STATUS, &compiled);
+	if (!compiled) {
+		char log[512];
+		glGetShaderInfoLog(fsh, 512, nullptr, log);
+		write_log("VKBD GL fragment shader error: %s\n", log);
+		glDeleteShader(vsh);
+		glDeleteShader(fsh);
+		return false;
+	}
+
+	vkbd_gl_program = glCreateProgram();
+	glAttachShader(vkbd_gl_program, vsh);
+	glAttachShader(vkbd_gl_program, fsh);
+	glBindAttribLocation(vkbd_gl_program, 0, "pos");
+	glLinkProgram(vkbd_gl_program);
+
+	GLint linked;
+	glGetProgramiv(vkbd_gl_program, GL_LINK_STATUS, &linked);
+	if (!linked) {
+		char log[512];
+		glGetProgramInfoLog(vkbd_gl_program, 512, nullptr, log);
+		write_log("VKBD GL program link error: %s\n", log);
+		glDeleteProgram(vkbd_gl_program);
+		vkbd_gl_program = 0;
+		glDeleteShader(vsh);
+		glDeleteShader(fsh);
+		return false;
+	}
+
+	glDeleteShader(vsh);
+	glDeleteShader(fsh);
+
+	vkbd_gl_tex_loc = glGetUniformLocation(vkbd_gl_program, "tex0");
+	vkbd_gl_alpha_loc = glGetUniformLocation(vkbd_gl_program, "alpha");
+	vkbd_gl_color_loc = glGetUniformLocation(vkbd_gl_program, "fillColor");
+	vkbd_gl_mode_loc = glGetUniformLocation(vkbd_gl_program, "mode");
+
+	if (vkbd_gl_vao == 0) glGenVertexArrays(1, &vkbd_gl_vao);
+	if (vkbd_gl_vbo == 0) glGenBuffers(1, &vkbd_gl_vbo);
+
+	return true;
+}
+
+static GLuint vkbd_upload_surface_to_gl(SDL_Surface* surface)
+{
+	if (!surface) return 0;
+
+	// Convert to RGBA32 if needed
+	SDL_Surface* rgba = SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+	if (!rgba) return 0;
+
+	GLuint tex = 0;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba->w, rgba->h, 0,
+		GL_RGBA, GL_UNSIGNED_BYTE, rgba->pixels);
+
+	SDL_FreeSurface(rgba);
+	return tex;
+}
+
+static void vkbd_render_gl_quad(GLuint texture, const SDL_Rect& rect,
+	int drawable_w, int drawable_h, float alpha_val)
+{
+	if (!texture || drawable_w <= 0 || drawable_h <= 0) return;
+
+	// Convert screen rect to NDC. Screen Y=0 is top, GL Y=0 is bottom.
+	float x0 = (2.0f * rect.x / drawable_w) - 1.0f;
+	float x1 = (2.0f * (rect.x + rect.w) / drawable_w) - 1.0f;
+	float y0 = 1.0f - (2.0f * (rect.y + rect.h) / drawable_h);
+	float y1 = 1.0f - (2.0f * rect.y / drawable_h);
+
+	GLfloat vertices[] = {
+		x0, y0, 0.0f, 1.0f,
+		x1, y0, 1.0f, 1.0f,
+		x1, y1, 1.0f, 0.0f,
+		x0, y1, 0.0f, 0.0f,
+	};
+
+	if (vkbd_gl_mode_loc != -1) glUniform1i(vkbd_gl_mode_loc, 0);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	if (vkbd_gl_tex_loc != -1) glUniform1i(vkbd_gl_tex_loc, 0);
+	if (vkbd_gl_alpha_loc != -1) glUniform1f(vkbd_gl_alpha_loc, alpha_val);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vkbd_gl_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+static void vkbd_render_gl_filled_rect(const SDL_Rect& rect,
+	int drawable_w, int drawable_h, float r, float g, float b, float a)
+{
+	if (drawable_w <= 0 || drawable_h <= 0) return;
+
+	float x0 = (2.0f * rect.x / drawable_w) - 1.0f;
+	float x1 = (2.0f * (rect.x + rect.w) / drawable_w) - 1.0f;
+	float y0 = 1.0f - (2.0f * (rect.y + rect.h) / drawable_h);
+	float y1 = 1.0f - (2.0f * rect.y / drawable_h);
+
+	GLfloat vertices[] = {
+		x0, y0, 0.0f, 0.0f,
+		x1, y0, 0.0f, 0.0f,
+		x1, y1, 0.0f, 0.0f,
+		x0, y1, 0.0f, 0.0f,
+	};
+
+	if (vkbd_gl_mode_loc != -1) glUniform1i(vkbd_gl_mode_loc, 1);
+	if (vkbd_gl_color_loc != -1) glUniform4f(vkbd_gl_color_loc, r, g, b, a);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vkbd_gl_vbo);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
+	glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 4 * sizeof(GLfloat), 0);
+	glDrawArrays(GL_TRIANGLE_FAN, 0, 4);
+}
+
+static void cleanup_vkbd_gl()
+{
+	if (vkbdGLTexture) { glDeleteTextures(1, &vkbdGLTexture); vkbdGLTexture = 0; }
+	if (vkbdGLTextureShift) { glDeleteTextures(1, &vkbdGLTextureShift); vkbdGLTextureShift = 0; }
+	if (vkbd_gl_vbo) { glDeleteBuffers(1, &vkbd_gl_vbo); vkbd_gl_vbo = 0; }
+	if (vkbd_gl_vao) { glDeleteVertexArrays(1, &vkbd_gl_vao); vkbd_gl_vao = 0; }
+	if (vkbd_gl_program) { glDeleteProgram(vkbd_gl_program); vkbd_gl_program = 0; }
+	if (vkbdSurface) { SDL_FreeSurface(vkbdSurface); vkbdSurface = nullptr; }
+	if (vkbdSurfaceShift) { SDL_FreeSurface(vkbdSurfaceShift); vkbdSurfaceShift = nullptr; }
+	vkbdGLTexWidth = 0;
+	vkbdGLTexHeight = 0;
+}
+
+static SDL_Surface* vkbd_create_keyboard_combined_surface(bool shift)
+{
+	const auto keyboard = vkbd_create_keyboard_surface(shift);
+	if (keyboard == nullptr) return nullptr;
+
+	SDL_Surface* surf;
+	if (vkbdKeyboardHasExitButton)
+	{
+		const auto exit = vkbd_create_exit_button_surface();
+		if (exit == nullptr)
+		{
+			SDL_FreeSurface(keyboard);
+			return nullptr;
+		}
+		surf = vkbd_concat_surfaces(keyboard, exit);
+		SDL_FreeSurface(exit);
+		if (surf == nullptr) return nullptr;
+	}
+	else
+	{
+		surf = keyboard;
+	}
+	return surf;
+}
+#else
+static SDL_Texture* vkbd_create_keyboard_texture(bool shift)
+{
+	AmigaMonitor* mon = &AMonitors[0];
+
+	const auto keyboard = vkbd_create_keyboard_surface(shift);
+	if (keyboard == nullptr)
+	{
+		return nullptr;
+	}
+
+	SDL_Surface* surf;
+	if (vkbdKeyboardHasExitButton)
+	{
+		const auto exit = vkbd_create_exit_button_surface();
+		if (exit == nullptr)
+		{
+			return nullptr;
+		}
+
+		surf = vkbd_concat_surfaces(keyboard, exit);
+
+		if (surf == nullptr)
+		{
+			return nullptr;
+		}
+
+		SDL_FreeSurface(exit);
+	}
+	else
+	{
+		surf = keyboard;
+	}
+
+	const auto texture = SDL_CreateTextureFromSurface(mon->amiga_renderer, surf);
+	SDL_FreeSurface(surf);
+	return texture;
+}
+#endif
+
+static int vkbd_find_index(int key)
+{
+	int index = 0;
+	while (vkbdRect[index].key != key)
+	{
+		++index;
+	}
+	return index;
+}
+
+void vkbd_update_position_from_texture()
+{
+	int width, height;
+#ifdef USE_OPENGL
+	width = vkbdGLTexWidth;
+	height = vkbdGLTexHeight;
+	if (width <= 0 || height <= 0) return;
+#else
+	SDL_QueryTexture(vkbdTexture, nullptr, nullptr, &width, &height);
+#endif
+	int renderedWidth = crop_rect.w, rendererHeight = crop_rect.h;
+
+#ifdef USE_OPENGL
+	// In OpenGL mode, crop_rect may not be set yet at init time.
+	// Skip until auto_crop_image() establishes valid crop_rect dimensions.
+	if (renderedWidth <= 0 || rendererHeight <= 0) return;
+	vkbdPositionSpaceW = renderedWidth;
+	vkbdPositionSpaceH = rendererHeight;
+#endif
+
+	vkbdEndX = (renderedWidth - width) / 2;
+	vkbdEndY = rendererHeight - height;
+
+	vkbdStartX = (renderedWidth - width) / 2;
+	vkbdStartY = rendererHeight;
+
+	// Initialize current position to start (hidden) if not currently showing
+	if (!vkbdShow)
+	{
+		vkbdCurrentX = vkbdStartX;
+		vkbdCurrentY = vkbdStartY;
+	}
+}
+
+void vkbd_update(bool createTextures)
+{
+	switch (vkbdLanguage)
+	{
+	case VKBD_LANGUAGE_UK:
+		vkbdRect = vkbdRectUK;
+		break;
+	case VKBD_LANGUAGE_GER:
+		vkbdRect = vkbdRectGER;
+		break;
+	case VKBD_LANGUAGE_FR:
+		vkbdRect = vkbdRectFR;
+		break;
+	default:
+		vkbdRect = vkbdRectUS;
+		break;
+	}
+#ifdef USE_OPENGL
+	if (createTextures || vkbdSurface != nullptr)
+	{
+		if (vkbdSurface != nullptr)
+		{
+			SDL_FreeSurface(vkbdSurface);
+		}
+		if (vkbdGLTexture != 0)
+		{
+			glDeleteTextures(1, &vkbdGLTexture);
+			vkbdGLTexture = 0;
+		}
+		vkbdSurface = vkbd_create_keyboard_combined_surface(false);
+		if (vkbdSurface)
+		{
+			vkbdGLTexWidth = vkbdSurface->w;
+			vkbdGLTexHeight = vkbdSurface->h;
+		}
+	}
+
+	if (createTextures || vkbdSurfaceShift != nullptr)
+	{
+		if (vkbdSurfaceShift != nullptr)
+		{
+			SDL_FreeSurface(vkbdSurfaceShift);
+		}
+		if (vkbdGLTextureShift != 0)
+		{
+			glDeleteTextures(1, &vkbdGLTextureShift);
+			vkbdGLTextureShift = 0;
+		}
+		vkbdSurfaceShift = vkbd_create_keyboard_combined_surface(true);
+	}
+
+	if (createTextures)
+	{
+		vkbd_update_position_from_texture();
+	}
+#else
+	if (createTextures || vkbdTexture != nullptr)
+	{
+		if (vkbdTexture != nullptr)
+		{
+			SDL_DestroyTexture(vkbdTexture);
+		}
+
+		vkbdTexture = vkbd_create_keyboard_texture(false);
+	}
+
+	if (createTextures || vkbdTextureShift != nullptr)
+	{
+		if (vkbdTextureShift != nullptr)
+		{
+			SDL_DestroyTexture(vkbdTextureShift);
+		}
+
+		vkbdTextureShift = vkbd_create_keyboard_texture(true);
+	}
+
+	if (createTextures)
+	{
+		vkbd_update_position_from_texture();
+	}
+#endif
+
+	vkbdPressedKeyColor.r = 200;
+	vkbdPressedKeyColor.g = 200;
+	vkbdPressedKeyColor.b = 0;
+	vkbdPressedKeyColor.a = 100;
+
+	vkbdStickyKeys.clear();
+	vkbdStickyKeys.insert(AK_LSH);
+	vkbdStickyKeys.insert(AK_RSH);
+	vkbdStickyKeys.insert(AK_CTRL);
+	vkbdStickyKeys.insert(AK_LALT);
+	vkbdStickyKeys.insert(AK_RALT);
+	vkbdStickyKeys.insert(AK_LAMI);
+	vkbdStickyKeys.insert(AK_RAMI);
+
+	vkbdPressedStickyKeys.clear();
+
+	vkbdStickyKeyToIndex.clear();
+	for (auto key : vkbdStickyKeys)
+	{
+		const auto index = vkbd_find_index(key);
+		vkbdStickyKeyToIndex[key] = index;
+	}
+
+	vkbdExitButtonRect.rect.x = 301;
+	vkbdExitButtonRect.rect.y = 1;
+	vkbdExitButtonRect.rect.w = 14;
+	vkbdExitButtonRect.rect.h = 72;
+	vkbdExitButtonRect.down = vkbdExitButtonIndex;
+	vkbdExitButtonRect.up = vkbdExitButtonIndex;
+	vkbdExitButtonRect.right = vkbd_find_index(AK_LSH);
+	vkbdExitButtonRect.left = vkbd_find_index(AK_ENT);
+	vkbdExitButtonRect.key = AKS_QUIT;
+}
+
+
+void vkbd_set_hires(bool hires)
+{
+	if (vkbdHires == hires)
+	{
+		return;
+	}
+
+	vkbdHires = hires;
+	vkbd_update(false);
+}
+
+void vkbd_set_language(VkbdLanguage language)
+{
+	if (vkbdLanguage == language)
+	{
+		return;
+	}
+
+	vkbdLanguage = language;
+	vkbd_update(false);
+}
+
+void vkbd_set_style(VkbdStyle style)
+{
+	if (vkbdStyle == style)
+	{
+		return;
+	}
+
+	vkbdStyle = style;
+	vkbd_update(false);
+}
+
+void vkbd_set_language(const std::string& language)
+{
+	VkbdLanguage vkbd_language;
+	if (language == "FR")
+		vkbd_language = VKBD_LANGUAGE_FR;
+	else if (language == "UK")
+		vkbd_language = VKBD_LANGUAGE_UK;
+	else if (language == "DE")
+		vkbd_language = VKBD_LANGUAGE_GER;
+	else
+		vkbd_language = VKBD_LANGUAGE_US;
+
+	vkbd_set_language(vkbd_language);
+}
+
+void vkbd_set_style(const std::string& style)
+{
+	VkbdStyle vkbd_style;
+	if (style == "Warm")
+		vkbd_style = VKBD_STYLE_WARM;
+	else if (style == "Cool")
+		vkbd_style = VKBD_STYLE_COOL;
+	else if (style == "Dark")
+		vkbd_style = VKBD_STYLE_DARK;
+	else
+		vkbd_style = VKBD_STYLE_ORIG;
+
+	vkbd_set_style(vkbd_style);
+}
+
+void vkbd_set_transparency(double transparency)
+{
+	vkbdTransparency = std::max(std::min(1.0, transparency), 0.0);
+	vkbdAlpha = static_cast<int>(255 * (1.0 - transparency));
+	vkbd_update(false);
+}
+
+void vkbd_set_keyboard_has_exit_button(bool keyboardHasExitButton)
+{
+	vkbdKeyboardHasExitButton = keyboardHasExitButton;
+	vkbd_update(false);
+}
+
+void vkbd_init()
+{
+	vkbd_update(true);
+}
+
+void vkbd_quit()
+{
+#ifdef USE_OPENGL
+	cleanup_vkbd_gl();
+#else
+	if (vkbdTexture != nullptr)
+	{
+		SDL_DestroyTexture(vkbdTexture);
+		vkbdTexture = nullptr;
+	}
+
+	if (vkbdTextureShift != nullptr)
+	{
+		SDL_DestroyTexture(vkbdTextureShift);
+		vkbdTextureShift = nullptr;
+	}
+#endif
+}
+
+static const VkbdRect& vkbd_get_key_rect(int index)
+{
+	if (index == vkbdExitButtonIndex)
+	{
+		return vkbdExitButtonRect;
+	}
+	return vkbdRect[index];
+}
+
+static SDL_Rect vkbd_get_key_drawing_rect(int index)
+{
+	SDL_Rect rect = vkbd_get_key_rect(index).rect;
+	if (vkbdHires)
+	{
+		rect.x *= 2;
+		rect.w *= 2;
+	}
+	rect.x += vkbdCurrentX;
+	rect.y += vkbdCurrentY;
+	return rect;
+}
+
+static bool vkbd_is_shift_pressed()
+{
+	return vkbdPressedStickyKeys.find(AK_LSH) != vkbdPressedStickyKeys.end() ||
+		vkbdPressedStickyKeys.find(AK_RSH) != vkbdPressedStickyKeys.end();
+}
+
+#ifndef USE_OPENGL
+static SDL_Texture* vkbd_get_texture_to_draw()
+{
+	return vkbd_is_shift_pressed() ? vkbdTextureShift : vkbdTexture;
+}
+#endif
+
+static void vkbd_update_current_xy()
+{
+	const auto now = std::chrono::system_clock::now();
+	const auto diff = now - vkbdTimeLastRedraw;
+	const double diffSeconds = std::chrono::duration_cast<std::chrono::milliseconds>(diff).count() / 1000.0;
+	const double speedX = (vkbdEndX - vkbdStartX) / vkbdSlideDurationInSeconds;
+	const double speedY = (vkbdEndY - vkbdStartY) / vkbdSlideDurationInSeconds;
+	const double sign = vkbdShow ? +1.0 : -1.0;
+	const int maxX = std::max(vkbdStartX, vkbdEndX);
+	const int maxY = std::max(vkbdStartY, vkbdEndY);
+	const int minX = std::min(vkbdStartX, vkbdEndX);
+	const int minY = std::min(vkbdStartY, vkbdEndY);
+
+	vkbdCurrentX += static_cast<int>(speedX * diffSeconds * sign);
+	vkbdCurrentX = std::max(minX, vkbdCurrentX);
+	vkbdCurrentX = std::min(maxX, vkbdCurrentX);
+
+	vkbdCurrentY += static_cast<int>(speedY * diffSeconds * sign);
+	vkbdCurrentY = std::max(minY, vkbdCurrentY);
+	vkbdCurrentY = std::min(maxY, vkbdCurrentY);
+}
+
+#ifdef USE_OPENGL
+// Scale an SDL_Rect from vkbd position coordinate space to drawable pixel space
+static SDL_Rect vkbd_scale_rect(const SDL_Rect& r, float sx, float sy)
+{
+	return {
+		static_cast<int>(r.x * sx),
+		static_cast<int>(r.y * sy),
+		static_cast<int>(r.w * sx),
+		static_cast<int>(r.h * sy)
+	};
+}
+
+void vkbd_redraw_gl(int drawable_w, int drawable_h)
+{
+	if (!vkbdShow && (vkbdCurrentX == vkbdStartX && vkbdCurrentY == vkbdStartY))
+	{
+		return;
+	}
+
+	vkbd_update_current_xy();
+
+	// After animation update, check if fully hidden
+	if (!vkbdShow && vkbdCurrentX == vkbdStartX && vkbdCurrentY == vkbdStartY)
+	{
+		return;
+	}
+
+	// Determine which surface/texture to use
+	const bool shiftPressed = vkbd_is_shift_pressed();
+	SDL_Surface* surf = shiftPressed ? vkbdSurfaceShift : vkbdSurface;
+	GLuint* gl_tex = shiftPressed ? &vkbdGLTextureShift : &vkbdGLTexture;
+
+	if (surf == nullptr) return;
+
+	// Lazy-init GL shader
+	if (!init_vkbd_gl_shader()) return;
+
+	// Upload surface to GL texture on first use (or after recreation)
+	if (*gl_tex == 0)
+	{
+		*gl_tex = vkbd_upload_surface_to_gl(surf);
+		if (*gl_tex == 0) return;
+	}
+
+	// Compute scale factor from position coordinate space to drawable pixels.
+	// The position system uses crop_rect dimensions at the time
+	// vkbd_update_position_from_texture() was called.
+	// Skip rendering if position space hasn't been established yet.
+	if (vkbdPositionSpaceW <= 0 || vkbdPositionSpaceH <= 0) return;
+	const float scaleX = static_cast<float>(drawable_w) / vkbdPositionSpaceW;
+	const float scaleY = static_cast<float>(drawable_h) / vkbdPositionSpaceH;
+
+	int w = surf->w;
+	int h = surf->h;
+	SDL_Rect rect;
+	rect.x = vkbdCurrentX;
+	rect.y = vkbdCurrentY;
+	rect.w = w;
+	rect.h = h;
+	rect = vkbd_scale_rect(rect, scaleX, scaleY);
+
+	// Set up GL state for overlay rendering
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glDisable(GL_SCISSOR_TEST);
+	glViewport(0, 0, drawable_w, drawable_h);
+
+	glUseProgram(vkbd_gl_program);
+	glBindVertexArray(vkbd_gl_vao);
+	glEnableVertexAttribArray(0);
+	glDisableVertexAttribArray(1);
+	glDisableVertexAttribArray(2);
+
+	// Render keyboard texture
+	const float alpha = static_cast<float>(vkbdAlpha) / 255.0f;
+	vkbd_render_gl_quad(*gl_tex, rect, drawable_w, drawable_h, alpha);
+
+	// Draw currently selected key highlight
+	const float keyAlpha = static_cast<float>((1.0 - vkbdTransparency) * vkbdPressedKeyColor.a) / 255.0f;
+	rect = vkbd_scale_rect(vkbd_get_key_drawing_rect(vkbdActualIndex), scaleX, scaleY);
+	vkbd_render_gl_filled_rect(rect, drawable_w, drawable_h,
+		vkbdPressedKeyColor.r / 255.0f, vkbdPressedKeyColor.g / 255.0f,
+		vkbdPressedKeyColor.b / 255.0f, keyAlpha);
+
+	// Draw sticky keys
+	for (auto key : vkbdPressedStickyKeys)
+	{
+		const auto index = vkbdStickyKeyToIndex[key];
+		rect = vkbd_scale_rect(vkbd_get_key_drawing_rect(index), scaleX, scaleY);
+		vkbd_render_gl_filled_rect(rect, drawable_w, drawable_h,
+			vkbdPressedKeyColor.r / 255.0f, vkbdPressedKeyColor.g / 255.0f,
+			vkbdPressedKeyColor.b / 255.0f, keyAlpha);
+	}
+
+	// Restore GL state
+	glDisableVertexAttribArray(0);
+	glBindVertexArray(0);
+	glBindBuffer(GL_ARRAY_BUFFER, 0);
+	glDisable(GL_BLEND);
+	glUseProgram(0);
+}
+#endif
+
+void vkbd_redraw()
+{
+#ifndef USE_OPENGL
+	AmigaMonitor* mon = &AMonitors[0];
+
+	if (!vkbdShow && vkbdCurrentX == vkbdStartX && vkbdCurrentY == vkbdStartY)
+	{
+		return;
+	}
+
+	vkbd_update_current_xy();
+
+	// After animation update, check if fully hidden
+	if (!vkbdShow && vkbdCurrentX == vkbdStartX && vkbdCurrentY == vkbdStartY)
+	{
+		return;
+	}
+
+	SDL_Texture* toDraw = vkbd_get_texture_to_draw();
+
+	if (toDraw == nullptr)
+	{
+		return;
+	}
+
+	int w = 0;
+	int h = 0;
+	SDL_QueryTexture(toDraw, nullptr, nullptr, &w, &h);
+	SDL_Rect rect;
+	rect.x = vkbdCurrentX;
+	rect.y = vkbdCurrentY;
+	rect.w = w;
+	rect.h = h;
+
+	SDL_SetRenderDrawBlendMode(mon->amiga_renderer, SDL_BLENDMODE_BLEND);
+	SDL_SetTextureBlendMode(toDraw, SDL_BLENDMODE_BLEND);
+	SDL_SetTextureAlphaMod(toDraw, vkbdAlpha);
+	SDL_RenderCopy(mon->amiga_renderer, toDraw, nullptr, &rect);
+
+	// Store color so we can restore later
+	SDL_Color color;
+	SDL_GetRenderDrawColor(mon->amiga_renderer, &color.r, &color.g, &color.b, &color.a);
+
+	// Draw currently selected key:
+	rect = vkbd_get_key_drawing_rect(vkbdActualIndex);
+	const int alpha = static_cast<int>((1.0 - vkbdTransparency) * vkbdPressedKeyColor.a);
+	SDL_SetRenderDrawColor(mon->amiga_renderer, vkbdPressedKeyColor.r, vkbdPressedKeyColor.g, vkbdPressedKeyColor.b, alpha);
+	SDL_RenderFillRect(mon->amiga_renderer, &rect);
+
+	// Draw sticky keys:
+	for (auto key : vkbdPressedStickyKeys)
+	{
+		const auto index = vkbdStickyKeyToIndex[key];
+		rect = vkbd_get_key_drawing_rect(index);
+		SDL_RenderFillRect(mon->amiga_renderer, &rect);
+	}
+
+	SDL_SetRenderDrawColor(mon->amiga_renderer, color.r, color.g, color.b, color.a);
+#endif
+}
+
+void vkbd_toggle()
+{
+	vkbdShow = !vkbdShow;
+	vkbdTimeLastRedraw = std::chrono::system_clock::now();
+}
+
+bool vkbd_is_active()
+{
+	return vkbdShow;
+}
+
+static bool vkbd_switched_on(int state, int vkbdPreviousState, int mask)
+{
+	return (state & mask) != (vkbdPreviousState & mask) && (state & mask) != 0;
+}
+
+static bool vkbd_switched_off(int state, int vkbdPreviousState, int mask)
+{
+	return (state & mask) != (vkbdPreviousState & mask) && (state & mask) == 0;
+}
+
+static int vkbd_move(const VkbdRect& rect, int direction)
+{
+	switch (direction)
+	{
+	case VKBD_UP:
+		return rect.up;
+	case VKBD_DOWN:
+		return rect.down;
+	case VKBD_LEFT:
+		return rect.left;
+	case VKBD_RIGHT:
+		return rect.right;
+	default:
+		return 0;
+	}
+}
+
+static int vkbd_move(int actualIndex, int direction)
+{
+	if (actualIndex == vkbdExitButtonIndex)
+	{
+		return vkbd_move(vkbdExitButtonRect, direction);
+	}
+
+	const auto& rect = vkbd_get_key_rect(actualIndex);
+	const auto key = rect.key;
+
+	for (const auto kvp : vkbdExitButtonConnections)
+	{
+		if (kvp.first == key && direction == kvp.second)
+		{
+			return vkbdExitButtonIndex;
+		}
+	}
+
+	return vkbd_move(rect, direction);
+}
+
+// For simplicity, we don't allow movement (up/down/left/right) when the fire button is pressed.
+// For normal (non-sticky) keys button press/release events are send whenever the fire button is released.
+// For sticky keys, the key is toggled whenever the fire button goes from not pressed to pressed.
+bool vkbd_process(int state, int* keycode, int* pressed)
+{
+	if (!vkbdShow || vkbdCurrentX != vkbdEndX || vkbdCurrentY != vkbdEndY)
+	{
+		vkbdPreviousState = 0;
+		return false;
+	}
+
+	// Check button up event.
+	bool result = false;
+	if (vkbd_switched_off(state, vkbdPreviousState, VKBD_BUTTON))
+	{
+		vkbdActualPressed = false;
+		const auto actual_key = vkbd_get_key_rect(vkbdActualIndex).key;
+		if (vkbdPressedStickyKeys.find(actual_key) == vkbdPressedStickyKeys.end())
+		{
+			*keycode = actual_key;
+			*pressed = 0;
+			result = true;
+		}
+	}
+
+	if ((state & VKBD_BUTTON) == 0)
+	{
+		for (const auto direction : vkbdDirections)
+		{
+			const bool on = vkbd_switched_on(state, vkbdPreviousState, direction);
+			if (on)
+			{
+				vkbdActualIndex = vkbd_move(vkbdActualIndex, direction);
+			}
+		}
+	}
+
+	if (vkbd_switched_on(state, vkbdPreviousState, VKBD_BUTTON))
+	{
+		const auto actual_key = vkbd_get_key_rect(vkbdActualIndex).key;
+		if (vkbdStickyKeys.find(actual_key) != vkbdStickyKeys.end())
+		{
+			vkbdActualPressed = false;
+			if (vkbdPressedStickyKeys.find(actual_key) != vkbdPressedStickyKeys.end())
+			{
+				const auto iter = vkbdPressedStickyKeys.find(actual_key);
+				vkbdPressedStickyKeys.erase(iter);
+				*keycode = actual_key;
+				*pressed = 0;
+				result = true;
+			}
+			else
+			{
+				vkbdPressedStickyKeys.insert(actual_key);
+				*keycode = actual_key;
+				*pressed = 1;
+				result = true;
+			}
+		}
+		else
+		{
+			*keycode = actual_key;
+			*pressed = 1;
+			result = true;
+			vkbdActualPressed = true;
+		}
+	}
+	vkbdPreviousState = state;
+
+	return result;
+}
+
+bool vkbd_get_bounds(SDL_Rect* rect)
+{
+	if (!vkbdShow || rect == nullptr)
+	{
+		return false;
+	}
+
+#ifdef USE_OPENGL
+	int width = vkbdGLTexWidth;
+	int height = vkbdGLTexHeight;
+#else
+	int width = 0;
+	int height = 0;
+	SDL_Texture* toDraw = vkbd_get_texture_to_draw();
+	if (toDraw == nullptr)
+	{
+		return false;
+	}
+	SDL_QueryTexture(toDraw, nullptr, nullptr, &width, &height);
+#endif
+
+	rect->x = vkbdCurrentX;
+	rect->y = vkbdCurrentY;
+	rect->w = width;
+	rect->h = height;
+
+	return true;
+}
+
+bool vkbd_handle_pointer(int x, int y, bool pressed, int* keycode, int* key_pressed)
+{
+	if (!vkbdShow || keycode == nullptr || key_pressed == nullptr)
+	{
+		return false;
+	}
+
+	// Check if pointer is within keyboard bounds
+	SDL_Rect kb;
+	if (!vkbd_get_bounds(&kb))
+	{
+		return false;
+	}
+
+	// Check if point is inside keyboard
+	if (x < kb.x || x >= kb.x + kb.w || y < kb.y || y >= kb.y + kb.h)
+	{
+		// If release event (pressed=false), still send key-up for last pressed key
+		if (!pressed && vkbdActualPressed)
+		{
+			const auto actual_key = vkbd_get_key_rect(vkbdActualIndex).key;
+			*keycode = actual_key;
+			*key_pressed = 0;
+			vkbdActualPressed = false;
+			return true;
+		}
+		return false;
+	}
+
+	// Find which key was hit
+	const int localX = x - vkbdCurrentX;
+	const int localY = y - vkbdCurrentY;
+
+	int hitIndex = -1;
+
+	// Check exit button first if enabled
+	if (vkbdKeyboardHasExitButton)
+	{
+		SDL_Rect exitRect = vkbdExitButtonRect.rect;
+		if (vkbdHires)
+		{
+			exitRect.x *= 2;
+			exitRect.w *= 2;
+		}
+		if (localX >= exitRect.x && localX < exitRect.x + exitRect.w &&
+			localY >= exitRect.y && localY < exitRect.y + exitRect.h)
+		{
+			hitIndex = vkbdExitButtonIndex;
+		}
+	}
+
+	// Check regular keys
+	if (hitIndex < 0)
+	{
+		int index = 0;
+		while (true)
+		{
+			SDL_Rect keyRect = vkbdRect[index].rect;
+			if (vkbdHires)
+			{
+				keyRect.x *= 2;
+				keyRect.w *= 2;
+			}
+			if (localX >= keyRect.x && localX < keyRect.x + keyRect.w &&
+				localY >= keyRect.y && localY < keyRect.y + keyRect.h)
+			{
+				hitIndex = index;
+				break;
+			}
+			// Move to next key - we need to know how many keys there are
+			// For simplicity, check if we've gone past known layouts
+			const int maxKeys = (vkbdLanguage == VKBD_LANGUAGE_US) ? 93 :
+				(vkbdLanguage == VKBD_LANGUAGE_UK) ? 94 :
+				(vkbdLanguage == VKBD_LANGUAGE_GER || vkbdLanguage == VKBD_LANGUAGE_FR) ? 95 : 93;
+			if (++index >= maxKeys)
+				break;
+		}
+	}
+
+	if (hitIndex < 0)
+	{
+		return false;
+	}
+
+	const auto hit_key = vkbd_get_key_rect(hitIndex).key;
+
+	if (pressed)
+	{
+		// Update actual index for visual feedback
+		vkbdActualIndex = hitIndex;
+
+		// Handle sticky keys
+		if (vkbdStickyKeys.find(hit_key) != vkbdStickyKeys.end())
+		{
+			if (vkbdPressedStickyKeys.find(hit_key) != vkbdPressedStickyKeys.end())
+			{
+				const auto iter = vkbdPressedStickyKeys.find(hit_key);
+				vkbdPressedStickyKeys.erase(iter);
+				*keycode = hit_key;
+				*key_pressed = 0;
+			}
+			else
+			{
+				vkbdPressedStickyKeys.insert(hit_key);
+				*keycode = hit_key;
+				*key_pressed = 1;
+			}
+		}
+		else
+		{
+			// For non-sticky keys, send key-down
+			*keycode = hit_key;
+			*key_pressed = 1;
+			vkbdActualPressed = true;
+		}
+	}
+	else
+	{
+		// Key release - only send for non-sticky keys
+		if (vkbdStickyKeys.find(hit_key) == vkbdStickyKeys.end())
+		{
+			*keycode = hit_key;
+			*key_pressed = 0;
+			vkbdActualPressed = false;
+		}
+	}
+
+	return true;
+}

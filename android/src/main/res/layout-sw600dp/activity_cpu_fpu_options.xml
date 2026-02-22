@@ -1,0 +1,366 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CPU &amp; FPU"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <!-- 3-column layout for tablets / larger screens -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="horizontal">
+
+            <!-- Column 1: CPU -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="CPU" />
+
+                <RadioGroup
+                    android:id="@+id/groupCpuModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68000"
+                        android:text="68000" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68010"
+                        android:text="68010" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68020"
+                        android:text="68020" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68030"
+                        android:text="68030" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68040"
+                        android:text="68040" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68060"
+                        android:text="68060" />
+                </RadioGroup>
+
+                <CheckBox
+                    android:id="@+id/chkCpu24"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="24-bit addressing" />
+
+                <CheckBox
+                    android:id="@+id/chkCpuCompatible"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="More compatible" />
+
+                <CheckBox
+                    android:id="@+id/chkCpuDataCache"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Data cache" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="CPU speed" />
+
+                <Spinner
+                    android:id="@+id/spinnerCpuSpeed"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="CPU cycle-exact multiplier" />
+
+                <Spinner
+                    android:id="@+id/spinnerCpuMultiplier"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+
+            <!-- Column 2: MMU / PPC -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="12dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="MMU" />
+
+                <Spinner
+                    android:id="@+id/spinnerMmuModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="PowerPC CPU options" />
+
+                <CheckBox
+                    android:id="@+id/chkPpcEnable"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Enable PPC emulation" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="PPC implementation" />
+
+                <Spinner
+                    android:id="@+id/spinnerPpcImplementation"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="PPC CPU idle" />
+
+                <Spinner
+                    android:id="@+id/spinnerPpcCpuIdle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content" />
+
+            </LinearLayout>
+
+            <!-- Column 3: FPU / JIT -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="FPU" />
+
+                <RadioGroup
+                    android:id="@+id/groupFpuModel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="0"
+                        android:text="None" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68881"
+                        android:text="68881" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68882"
+                        android:text="68882" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68040"
+                        android:text="CPU internal (68040)" />
+
+                    <RadioButton
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:tag="68060"
+                        android:text="CPU internal (68060)" />
+                </RadioGroup>
+
+                <CheckBox
+                    android:id="@+id/chkFpuStrict"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Strict FPU" />
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="JIT" />
+
+                <CheckBox
+                    android:id="@+id/chkJitEnable"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Enable JIT" />
+
+                <Button
+                    android:id="@+id/btnJitAdvanced"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Advanced JIT…" />
+
+                <LinearLayout
+                    android:id="@+id/layoutJitAdvanced"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Cache size (MB)" />
+
+                    <Spinner
+                        android:id="@+id/spinnerJitCacheSize"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <CheckBox
+                        android:id="@+id/chkJitFpu"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="FPU support" />
+
+                    <CheckBox
+                        android:id="@+id/chkJitConstJump"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Constant jump" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Flush mode" />
+
+                    <Spinner
+                        android:id="@+id/spinnerJitFlush"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content" />
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="Trust mode" />
+
+                    <RadioGroup
+                        android:id="@+id/groupJitTrust"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical">
+
+                        <RadioButton
+                            android:id="@+id/radioJitTrustDirect"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Direct" />
+
+                        <RadioButton
+                            android:id="@+id/radioJitTrustIndirect"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Indirect" />
+                    </RadioGroup>
+
+                    <CheckBox
+                        android:id="@+id/chkJitNoFlags"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No flags" />
+
+                    <CheckBox
+                        android:id="@+id/chkJitCatchFault"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="Catch unexpected exceptions" />
+
+                </LinearLayout>
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCpuFpuSave"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Save" />
+
+            <Button
+                android:id="@+id/btnCpuFpuReset"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Reset" />
+
+            <Button
+                android:id="@+id/btnCpuFpuBack"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Back" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Note: Some combinations (Cycle-exact + JIT + 68020+) may be forced off by the emulator." />
+
+    </LinearLayout>
+</ScrollView>

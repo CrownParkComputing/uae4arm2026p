@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Transparent background to avoid the launcher adding a white "plate" behind legacy icons. -->
+    <color name="ic_launcher_background">#00000000</color>
+</resources>

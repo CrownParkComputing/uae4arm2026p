@@ -1,0 +1,26 @@
+UAE4ARM 2026 — GNU General Public License Notice
+=================================================
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+The full text of the GNU General Public License version 3 is
+contained in the LICENSE file in this directory.
+
+You should also have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+This project derives from:
+  - WinUAE by Toni Wilen <https://www.winuae.net/>
+  - Amiberry by Dimitris Panokostas <https://amiberry.com/>
+
+Both upstream projects are released under the GNU General Public License.

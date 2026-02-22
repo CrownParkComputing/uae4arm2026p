@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Walkthrough model selection radio button IDs -->
+    <item type="id" name="walkthrough_model_a500" />
+    <item type="id" name="walkthrough_model_a1200" />
+    <item type="id" name="walkthrough_model_a4000" />
+    <item type="id" name="walkthrough_model_cd32" />
+    <item type="id" name="walkthrough_model_cdtv" />
+    
+    <!-- AmiberryActivity container IDs -->
+    <item type="id" name="amiberry_emulator_container" />
+    <item type="id" name="amiberry_gui_container" />
+</resources>

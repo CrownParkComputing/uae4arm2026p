@@ -1,0 +1,3 @@
+Copyright 2026 Whitty Apps
+
+Thanks to the Amiberry and WinUAE projects; this port would not be possible without them.

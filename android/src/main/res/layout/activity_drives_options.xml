@@ -1,0 +1,412 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Drives / CD"
+            android:textSize="20sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="CD Image" />
+
+        <TextView
+            android:id="@+id/tvCd0Path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnCd0Pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select CD Image" />
+
+            <Button
+                android:id="@+id/btnCd0Clear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <Switch
+            android:id="@+id/swCd32CdEnabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Enable CD32/CDTV CD device (cd32cd)" />
+
+        <CheckBox
+            android:id="@+id/cbMapCdDrives"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Auto-mount CD drives (map_cd_drives)" />
+
+        <CheckBox
+            android:id="@+id/cbCdTurbo"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Turbo CD read speed (cd_speed=0)" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="12dp"
+            android:background="#444" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Directory Hard Drive #0 (filesystem2)" />
+
+        <Switch
+            android:id="@+id/swDir0Enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable DH0 mount" />
+
+        <TextView
+            android:id="@+id/tvDir0Path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnDir0Pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select Folder" />
+
+            <Button
+                android:id="@+id/btnDir0Clear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etDir0Dev"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Device name (e.g. DH0)" />
+
+        <EditText
+            android:id="@+id/etDir0Vol"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Volume name (e.g. Work)" />
+
+        <CheckBox
+            android:id="@+id/cbDir0ReadOnly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read-only" />
+
+        <EditText
+            android:id="@+id/etDir0BootPri"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Boot priority (e.g. 0)"
+            android:inputType="numberSigned" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="12dp"
+            android:background="#444" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Directory Hard Drive #1 (filesystem2)" />
+
+        <Switch
+            android:id="@+id/swDir1Enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable DH1 mount" />
+
+        <TextView
+            android:id="@+id/tvDir1Path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnDir1Pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select Folder" />
+
+            <Button
+                android:id="@+id/btnDir1Clear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etDir1Dev"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Device name (e.g. DH1)" />
+
+        <EditText
+            android:id="@+id/etDir1Vol"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Volume name" />
+
+        <CheckBox
+            android:id="@+id/cbDir1ReadOnly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read-only" />
+
+        <EditText
+            android:id="@+id/etDir1BootPri"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Boot priority (e.g. -128)"
+            android:inputType="numberSigned" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="12dp"
+            android:background="#444" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Hardfile (HDF) (hardfile2)" />
+
+        <Switch
+            android:id="@+id/swHdf0Enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable HDF mount" />
+
+        <TextView
+            android:id="@+id/tvHdf0Path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnHdf0Pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select HDF" />
+
+            <Button
+                android:id="@+id/btnHdf0Clear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etHdf0Dev"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Device name (e.g. DH0)" />
+
+        <CheckBox
+            android:id="@+id/cbHdf0ReadOnly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read-only" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="12dp"
+            android:background="#444" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Hardfile (HDF) #1 (hardfile2)" />
+
+        <Switch
+            android:id="@+id/swHdf1Enabled"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable HDF1 mount" />
+
+        <TextView
+            android:id="@+id/tvHdf1Path"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnHdf1Pick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select HDF" />
+
+            <Button
+                android:id="@+id/btnHdf1Clear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etHdf1Dev"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:hint="Device name (e.g. DH1)" />
+
+        <CheckBox
+            android:id="@+id/cbHdf1ReadOnly"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Read-only" />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="12dp"
+            android:background="#444" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="DOS hardfile filesystem module (optional)" />
+
+        <TextView
+            android:id="@+id/tvDosFsPath"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="(not set)" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnDosFsPick"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Select filesystem module" />
+
+            <Button
+                android:id="@+id/btnDosFsClear"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Clear" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnDrivesSave"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Save" />
+
+            <Button
+                android:id="@+id/btnDrivesBack"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:text="Back" />
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Tip: Some DOS\\x hardfiles require a filesystem module (e.g. 'FastFileSystem') to be available early in boot. Select it above if DH0 shows NDOS." />
+
+    </LinearLayout>
+
+</ScrollView>
