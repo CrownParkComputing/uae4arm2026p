@@ -2971,6 +2971,22 @@ public class AmiberryActivity extends SDLActivity {
             Log.w(TAG, "Unable to read intent extras: " + t);
         }
 
+        // If no model was provided via the intent (e.g. launched from ConfigManagerActivity after
+        // loading a saved config), fall back to the persisted launcher preference so the emulator
+        // always boots with the correct machine baseline.
+        if (mQsModel == null || mQsModel.trim().isEmpty()) {
+            try {
+                SharedPreferences bp = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                String m = bp.getString("qs_model", null);
+                if (m != null && !m.trim().isEmpty()) {
+                    mQsModel = m.trim();
+                    mQsConfigIndex = bp.getInt("qs_config", 0);
+                    logI("qs_model not in intent; falling back to prefs: " + mQsModel + " cfg=" + mQsConfigIndex);
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
         if (forcedKick != null && !forcedKick.isEmpty()) {
             mKickstartRomFile = forcedKick;
             logI("Using forced Kickstart ROM from intent: " + mKickstartRomFile);

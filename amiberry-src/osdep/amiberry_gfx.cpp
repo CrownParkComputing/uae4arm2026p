@@ -3744,6 +3744,13 @@ static int create_windows(struct AmigaMonitor* mon)
 		// if (ap->gfx_vsync > 0)
 		//	renderer_flags |= SDL_RENDERER_PRESENTVSYNC;
 
+#ifdef AMIBERRY_ANDROID
+		// On Android, explicitly request OpenGL ES 2.0 for hardware-accelerated rendering.
+		// SDL2's default accelerated backend on Android is already OpenGL ES, but setting the
+		// hint explicitly ensures the correct driver is selected and avoids any fallback to
+		// software rendering on devices with non-standard driver enumeration.
+		SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
+#endif
 		mon->amiga_renderer = SDL_CreateRenderer(mon->amiga_window, -1, renderer_flags);
 		check_error_sdl(mon->amiga_renderer == nullptr, "Unable to create a renderer:");
 	}

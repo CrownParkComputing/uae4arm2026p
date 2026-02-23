@@ -6403,6 +6403,19 @@ public class BootstrapActivity extends Activity {
             }
 
             applyKickstartAutoForCurrentModel(false);
+
+            // Re-read floppy and HD visibility flags from prefs so that a config loaded while
+            // this activity is paused (e.g. from ConfigManagerActivity) is reflected correctly
+            // when the activity resumes, without requiring an onCreate cycle.
+            mDf1Added = launcherPrefs.getBoolean(PREF_SHOW_DF1, false);
+            mDf2Added = launcherPrefs.getBoolean(PREF_SHOW_DF2, false);
+            mDf3Added = launcherPrefs.getBoolean(PREF_SHOW_DF3, false);
+            mDh0Added = launcherPrefs.getBoolean(PREF_SHOW_DH0, false);
+            mDh1Added = launcherPrefs.getBoolean(PREF_SHOW_DH1, false);
+            mDh2Added = launcherPrefs.getBoolean(PREF_SHOW_DH2, false);
+            mDh3Added = launcherPrefs.getBoolean(PREF_SHOW_DH3, false);
+            mDh4Added = launcherPrefs.getBoolean(PREF_SHOW_DH4, false);
+            mCd0Added = launcherPrefs.getBoolean(PREF_SHOW_CD0, false);
         } finally {
             mSuppressUiCallbacks = false;
         }
