@@ -34,6 +34,11 @@ static int vkbdAlpha = 255;
 static double vkbdSlideDurationInSeconds = 1.0;
 static bool vkbdKeyboardHasExitButton = true;
 
+// Scaling for mobile devices - keyboard will scale to fit screen
+static float vkbdScale = 1.0f;
+static int vkbdScaledWidth = 0;
+static int vkbdScaledHeight = 0;
+
 // All directions:
 const std::vector<int> vkbdDirections{VKBD_UP, VKBD_DOWN, VKBD_LEFT, VKBD_RIGHT};
 
@@ -980,10 +985,21 @@ void vkbd_update_position_from_texture()
 	vkbdPositionSpaceH = rendererHeight;
 #endif
 
-	vkbdEndX = (renderedWidth - width) / 2;
-	vkbdEndY = rendererHeight - height;
+	// For touch devices, scale keyboard to be DOUBLE the screen width
+	// This ensures all keys are large enough for touch input
+	// The keyboard will be positioned at the bottom of the screen
+	
+	// Scale to 2x screen width for larger keys
+	const float scaleToFitWidth = static_cast<float>(renderedWidth) / static_cast<float>(width);
+	vkbdScale = scaleToFitWidth * 2.0f;  // Double the size
+	vkbdScaledWidth = static_cast<int>(width * vkbdScale);
+	vkbdScaledHeight = static_cast<int>(height * vkbdScale);
+	
+	// Center horizontally (will be 0 since we're using full width), position at bottom
+	vkbdEndX = 0;  // Start from left edge since we're using full width
+	vkbdEndY = rendererHeight - vkbdScaledHeight;
 
-	vkbdStartX = (renderedWidth - width) / 2;
+	vkbdStartX = 0;
 	vkbdStartY = rendererHeight;
 
 	// Initialize current position to start (hidden) if not currently showing
@@ -1228,6 +1244,14 @@ static SDL_Rect vkbd_get_key_drawing_rect(int index)
 		rect.x *= 2;
 		rect.w *= 2;
 	}
+	// Apply scaling for touch devices
+	if (vkbdScale != 1.0f)
+	{
+		rect.x = static_cast<int>(rect.x * vkbdScale);
+		rect.y = static_cast<int>(rect.y * vkbdScale);
+		rect.w = static_cast<int>(rect.w * vkbdScale);
+		rect.h = static_cast<int>(rect.h * vkbdScale);
+	}
 	rect.x += vkbdCurrentX;
 	rect.y += vkbdCurrentY;
 	return rect;
@@ -1320,8 +1344,10 @@ void vkbd_redraw_gl(int drawable_w, int drawable_h)
 	const float scaleX = static_cast<float>(drawable_w) / vkbdPositionSpaceW;
 	const float scaleY = static_cast<float>(drawable_h) / vkbdPositionSpaceH;
 
-	int w = surf->w;
-	int h = surf->h;
+	// Use scaled dimensions if scaling is active (vkbdScale > 1 means we need to enlarge)
+	int w = (vkbdScale > 1.0f) ? vkbdScaledWidth : surf->w;
+	int h = (vkbdScale > 1.0f) ? vkbdScaledHeight : surf->h;
+	
 	SDL_Rect rect;
 	rect.x = vkbdCurrentX;
 	rect.y = vkbdCurrentY;
@@ -1396,14 +1422,12 @@ void vkbd_redraw()
 		return;
 	}
 
-	int w = 0;
-	int h = 0;
-	SDL_QueryTexture(toDraw, nullptr, nullptr, &w, &h);
+	// Use scaled dimensions for touch devices
 	SDL_Rect rect;
 	rect.x = vkbdCurrentX;
 	rect.y = vkbdCurrentY;
-	rect.w = w;
-	rect.h = h;
+	rect.w = vkbdScaledWidth;
+	rect.h = vkbdScaledHeight;
 
 	SDL_SetRenderDrawBlendMode(mon->amiga_renderer, SDL_BLENDMODE_BLEND);
 	SDL_SetTextureBlendMode(toDraw, SDL_BLENDMODE_BLEND);
@@ -1570,24 +1594,11 @@ bool vkbd_get_bounds(SDL_Rect* rect)
 		return false;
 	}
 
-#ifdef USE_OPENGL
-	int width = vkbdGLTexWidth;
-	int height = vkbdGLTexHeight;
-#else
-	int width = 0;
-	int height = 0;
-	SDL_Texture* toDraw = vkbd_get_texture_to_draw();
-	if (toDraw == nullptr)
-	{
-		return false;
-	}
-	SDL_QueryTexture(toDraw, nullptr, nullptr, &width, &height);
-#endif
-
+	// Use scaled dimensions if scaling is active
 	rect->x = vkbdCurrentX;
 	rect->y = vkbdCurrentY;
-	rect->w = width;
-	rect->h = height;
+	rect->w = vkbdScaledWidth;
+	rect->h = vkbdScaledHeight;
 
 	return true;
 }
@@ -1636,6 +1647,14 @@ bool vkbd_handle_pointer(int x, int y, bool pressed, int* keycode, int* key_pres
 			exitRect.x *= 2;
 			exitRect.w *= 2;
 		}
+		// Apply scaling for touch devices
+		if (vkbdScale != 1.0f)
+		{
+			exitRect.x = static_cast<int>(exitRect.x * vkbdScale);
+			exitRect.y = static_cast<int>(exitRect.y * vkbdScale);
+			exitRect.w = static_cast<int>(exitRect.w * vkbdScale);
+			exitRect.h = static_cast<int>(exitRect.h * vkbdScale);
+		}
 		if (localX >= exitRect.x && localX < exitRect.x + exitRect.w &&
 			localY >= exitRect.y && localY < exitRect.y + exitRect.h)
 		{
@@ -1654,6 +1673,14 @@ bool vkbd_handle_pointer(int x, int y, bool pressed, int* keycode, int* key_pres
 			{
 				keyRect.x *= 2;
 				keyRect.w *= 2;
+			}
+			// Apply scaling for touch devices
+			if (vkbdScale != 1.0f)
+			{
+				keyRect.x = static_cast<int>(keyRect.x * vkbdScale);
+				keyRect.y = static_cast<int>(keyRect.y * vkbdScale);
+				keyRect.w = static_cast<int>(keyRect.w * vkbdScale);
+				keyRect.h = static_cast<int>(keyRect.h * vkbdScale);
 			}
 			if (localX >= keyRect.x && localX < keyRect.x + keyRect.w &&
 				localY >= keyRect.y && localY < keyRect.y + keyRect.h)

@@ -426,8 +426,21 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
+                    android:backgroundTint="#1565C0"
+                    android:textColor="#FFFFFF"
                     style="@style/QuickButton"
                     android:text="Configs" />
+
+                <Button
+                    android:id="@+id/btnSetup"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:backgroundTint="#6A1B9A"
+                    android:textColor="#FFFFFF"
+                    style="@style/QuickButton"
+                    android:text="Setup" />
 
                 <Button
                     android:id="@+id/btnHelp"
@@ -435,6 +448,8 @@
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
                     android:layout_marginStart="8dp"
+                    android:backgroundTint="#EF6C00"
+                    android:textColor="#FFFFFF"
                     style="@style/QuickButton"
                     android:text="Help" />
 

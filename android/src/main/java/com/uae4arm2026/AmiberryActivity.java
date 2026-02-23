@@ -171,6 +171,7 @@ public class AmiberryActivity extends SDLActivity {
     // Optional intent extra to force a specific DF0 disk image file.
     // If provided, this overrides internal/external disk auto-detection.
     public static final String EXTRA_DF0_DISK_FILE = "com.uae4arm2026.extra.DF0_DISK_FILE";
+    public static final String EXTRA_DF0_SOURCE_NAME = "com.uae4arm2026.extra.DF0_SOURCE_NAME";
 
     // Optional intent extras to force disk images for DF1–DF3.
     public static final String EXTRA_DF1_DISK_FILE = "com.uae4arm2026.extra.DF1_DISK_FILE";
@@ -242,6 +243,7 @@ public class AmiberryActivity extends SDLActivity {
 
     // Optional DF0 disk image.
     private String mDf0DiskImagePath = null;
+    private String mDf0SourceName = null;
 
     // Optional DF1–DF3 disk images.
     private String mDf1DiskImagePath = null;
@@ -263,6 +265,72 @@ public class AmiberryActivity extends SDLActivity {
     private FrameLayout mRootLayer;
     private FrameLayout mEmulatorLayer;
     private boolean mPausedByOverlay = false;
+
+    /**
+     * Derive mapper profile id from currently loaded media.
+     * Format: MEDIA_GAMENAME (e.g. WHD_LOTUS2, DF0_SHADOW_OF_THE_BEAST).
+     */
+    private String getGameIdentifier() {
+        String media = null;
+        String game = filenameWithoutExtension(mWHDLoadFile);
+        if (game != null) {
+            media = "WHD";
+        } else {
+            game = resolveDf0GameName();
+            if (game != null) {
+                media = "DF0";
+            }
+        }
+        if (media == null || game == null) {
+            return null;
+        }
+
+        return media + "_" + sanitizeIdComponent(game);
+    }
+
+    private String resolveDf0GameName() {
+        String sourceName = filenameWithoutExtension(mDf0SourceName);
+        if (sourceName != null && !sourceName.trim().isEmpty()) {
+            return sourceName;
+        }
+
+        String fromPath = filenameWithoutExtension(mDf0DiskImagePath);
+        if (fromPath == null || fromPath.trim().isEmpty()) {
+            return null;
+        }
+
+        if ("disk".equalsIgnoreCase(fromPath)) {
+            try {
+                String bootstrapSource = getSharedPreferences("bootstrap", MODE_PRIVATE).getString("df0_src", null);
+                String fromBootstrap = filenameWithoutExtension(bootstrapSource);
+                if (fromBootstrap != null && !fromBootstrap.trim().isEmpty()) {
+                    return fromBootstrap;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        return fromPath;
+    }
+
+    private static String sanitizeIdComponent(String value) {
+        if (value == null || value.trim().isEmpty()) return "UNKNOWN";
+        String s = value.trim().toUpperCase(java.util.Locale.ROOT);
+        s = s.replaceAll("[^A-Z0-9_-]", "_");
+        if (s.isEmpty()) return "UNKNOWN";
+        return s;
+    }
+
+    /** Strip directory and extension from a path, returning null for blank/null inputs. */
+    private static String filenameWithoutExtension(String path) {
+        if (path == null || path.trim().isEmpty()) return null;
+        String name = path.trim();
+        int sep = Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\'));
+        if (sep >= 0) name = name.substring(sep + 1);
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) name = name.substring(0, dot);
+        return name.isEmpty() ? null : name;
+    }
 
     private VirtualJoystickOverlay mVirtualJoystick;
     private View mVkbdTouchInterceptor;
@@ -472,24 +540,16 @@ public class AmiberryActivity extends SDLActivity {
         if (!p.startsWith("content://")) return p;
 
         try {
-            ContentResolver cr = getContentResolver();
             Uri uri = Uri.parse(p);
+            String outName = basenameFromMaybeEncodedDocId(uri.getLastPathSegment());
 
-            String fileName = basenameFromMaybeEncodedDocId(uri.getLastPathSegment());
-            if (!fileName.toLowerCase().endsWith(".lha") && !fileName.toLowerCase().endsWith(".lzh")) {
-                fileName = fileName + ".lha";
-            }
+            File stageDir = new File(getCacheDir(), "whdload_uri");
+            ensureDir(stageDir);
+            File outFile = new File(stageDir, outName);
 
-            File outDir = new File(getCacheDir(), "whdload-import");
-            ensureDir(outDir);
-            File outFile = new File(outDir, fileName);
-
-            try (InputStream in = cr.openInputStream(uri);
-                 FileOutputStream out = new FileOutputStream(outFile, false)) {
-                if (in == null) {
-                    logI("WHDLoad URI materialize failed (null input stream), using URI directly: " + p);
-                    return p;
-                }
+            try (InputStream in = getContentResolver().openInputStream(uri);
+                 FileOutputStream out = new FileOutputStream(outFile)) {
+                if (in == null) return p;
                 byte[] buf = new byte[256 * 1024];
                 int n;
                 while ((n = in.read(buf)) > 0) {
@@ -1247,22 +1307,91 @@ public class AmiberryActivity extends SDLActivity {
 
     private static String joyEventForAction(int port, String action) {
         if (action == null || action.trim().isEmpty()) return null;
-        final String prefix = (port == 0) ? "JOY1_" : "JOY2_";
+        String keyboardEvent = keyboardEventForAction(action);
+        if (keyboardEvent != null) return keyboardEvent;
+        // Amiberry's find_inputevent() matches against the display name defined
+        // in inputevents.def (e.g. "Joy1 Up", "Joy1 Fire/Mouse1 Left Button").
+        // Port 0 = joyport0 = Joy1 in Amiberry; Port 1 = joyport1 = Joy2.
+        final String jn = (port == 0) ? "Joy1" : "Joy2";
+        final String mn = (port == 0) ? "Mouse1" : "Mouse2";
         switch (action.trim().toUpperCase()) {
-            case "UP": return prefix + "UP";
-            case "DOWN": return prefix + "DOWN";
-            case "LEFT": return prefix + "LEFT";
-            case "RIGHT": return prefix + "RIGHT";
-            case "FIRE1": return prefix + "FIRE_BUTTON";
-            case "FIRE2": return prefix + "2ND_BUTTON";
-            case "FIRE3": return prefix + "3RD_BUTTON";
-            case "CD32_RED": return prefix + "CD32_RED";
-            case "CD32_BLUE": return prefix + "CD32_BLUE";
-            case "CD32_GREEN": return prefix + "CD32_GREEN";
-            case "CD32_YELLOW": return prefix + "CD32_YELLOW";
-            case "CD32_PLAY": return prefix + "CD32_PLAY";
-            case "CD32_RWD": return prefix + "CD32_RWD";
-            case "CD32_FFW": return prefix + "CD32_FFW";
+            case "UP":          return jn + " Up";
+            case "DOWN":        return jn + " Down";
+            case "LEFT":        return jn + " Left";
+            case "RIGHT":       return jn + " Right";
+            case "FIRE1":       return jn + " Fire/" + mn + " Left Button";
+            case "FIRE2":       return jn + " 2nd Button/" + mn + " Right Button";
+            case "FIRE3":       return jn + " 3rd Button/" + mn + " Middle Button";
+            case "CD32_RED":    return jn + " CD32 Red";
+            case "CD32_BLUE":   return jn + " CD32 Blue";
+            case "CD32_GREEN":  return jn + " CD32 Green";
+            case "CD32_YELLOW": return jn + " CD32 Yellow";
+            case "CD32_PLAY":   return jn + " CD32 Play";
+            case "CD32_RWD":    return jn + " CD32 RWD";
+            case "CD32_FFW":    return jn + " CD32 FFW";
+            default: return null;
+        }
+    }
+
+    private static String keyboardEventForAction(String action) {
+        if (action == null || action.trim().isEmpty()) return null;
+        switch (action.trim().toUpperCase()) {
+            case "KEY_SPACE": return "Space";
+            case "KEY_RETURN": return "Return";
+            case "KEY_ESC": return "ESC";
+            case "KEY_TAB": return "Tab";
+            case "KEY_BACKSPACE": return "Backspace";
+            case "KEY_DEL": return "Del";
+            case "KEY_CURSOR_UP": return "Cursor Up";
+            case "KEY_CURSOR_DOWN": return "Cursor Down";
+            case "KEY_CURSOR_LEFT": return "Cursor Left";
+            case "KEY_CURSOR_RIGHT": return "Cursor Right";
+            case "KEY_F1": return "F1";
+            case "KEY_F2": return "F2";
+            case "KEY_F3": return "F3";
+            case "KEY_F4": return "F4";
+            case "KEY_F5": return "F5";
+            case "KEY_F6": return "F6";
+            case "KEY_F7": return "F7";
+            case "KEY_F8": return "F8";
+            case "KEY_F9": return "F9";
+            case "KEY_F10": return "F10";
+            case "KEY_A": return "A";
+            case "KEY_B": return "B";
+            case "KEY_C": return "C";
+            case "KEY_D": return "D";
+            case "KEY_E": return "E";
+            case "KEY_F": return "F";
+            case "KEY_G": return "G";
+            case "KEY_H": return "H";
+            case "KEY_I": return "I";
+            case "KEY_J": return "J";
+            case "KEY_K": return "K";
+            case "KEY_L": return "L";
+            case "KEY_M": return "M";
+            case "KEY_N": return "N";
+            case "KEY_O": return "O";
+            case "KEY_P": return "P";
+            case "KEY_Q": return "Q";
+            case "KEY_R": return "R";
+            case "KEY_S": return "S";
+            case "KEY_T": return "T";
+            case "KEY_U": return "U";
+            case "KEY_V": return "V";
+            case "KEY_W": return "W";
+            case "KEY_X": return "X";
+            case "KEY_Y": return "Y";
+            case "KEY_Z": return "Z";
+            case "KEY_0": return "0";
+            case "KEY_1": return "1";
+            case "KEY_2": return "2";
+            case "KEY_3": return "3";
+            case "KEY_4": return "4";
+            case "KEY_5": return "5";
+            case "KEY_6": return "6";
+            case "KEY_7": return "7";
+            case "KEY_8": return "8";
+            case "KEY_9": return "9";
             default: return null;
         }
     }
@@ -1270,25 +1399,54 @@ public class AmiberryActivity extends SDLActivity {
     private static void addJoyMappingOption(List<String> args, int port, String buttonSuffix, String actionValue) {
         String eventName = joyEventForAction(port, actionValue);
         if (eventName == null) return;
+        String opt = "joyport" + port + "_amiberry_custom_none_" + buttonSuffix + "=" + eventName;
+        Log.i(TAG, "Joy map arg: -s " + opt);
         args.add("-s");
-        args.add("joyport" + port + "_amiberry_custom_none_" + buttonSuffix + "=" + eventName);
+        args.add(opt);
     }
 
-    private static void addAndroidJoyMappingsFromPrefs(List<String> args, SharedPreferences p) {
-        String mapA = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_A, "");
-        String mapB = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_B, "");
-        String mapX = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_X, "");
-        String mapY = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_Y, "");
-        String mapL1 = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_L1, "");
-        String mapR1 = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_R1, "");
-        String mapBack = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_BACK, "");
-        String mapStart = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_START, "");
-        String mapDpadUp = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_UP, "");
-        String mapDpadDown = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_DOWN, "");
-        String mapDpadLeft = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_LEFT, "");
-        String mapDpadRight = p.getString(UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_RIGHT, "");
+    private static void addAndroidJoyMappingsFromPrefs(List<String> args,
+                                                       SharedPreferences globalPrefs,
+                                                       SharedPreferences perGamePrefs,
+                                                       String gameId) {
+        // Read effective per-button mappings (per-game override → global fallback).
+        String mapA     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_A);
+        String mapB     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_B);
+        String mapX     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_X);
+        String mapY     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_Y);
+        String mapL1    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_L1);
+        String mapR1    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_R1);
+        String mapBack  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_BACK);
+        String mapStart = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_START);
+        String mapDpadUp    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_UP);
+        String mapDpadDown  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_DOWN);
+        String mapDpadLeft  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_LEFT);
+        String mapDpadRight = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_RIGHT);
 
-        for (int port = 0; port <= 1; port++) {
+        if (gameId != null) {
+            Log.i(TAG, "Joy mapping: using per-game overrides for \"" + gameId + "\"");
+        }
+
+        java.util.ArrayList<Integer> targetPorts = new java.util.ArrayList<>();
+        try {
+            String p0 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT0_MODE, "mouse");
+            if (p0 != null && p0.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
+                targetPorts.add(0);
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            String p1 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT1_MODE, "joy0");
+            if (p1 != null && p1.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
+                targetPorts.add(1);
+            }
+        } catch (Throwable ignored) {
+        }
+        if (targetPorts.isEmpty()) {
+            targetPorts.add(1);
+        }
+
+        for (int port : targetPorts) {
             addJoyMappingOption(args, port, "a", mapA);
             addJoyMappingOption(args, port, "b", mapB);
             addJoyMappingOption(args, port, "x", mapX);
@@ -1592,27 +1750,82 @@ public class AmiberryActivity extends SDLActivity {
     private int getFloppySoundVolumePref() {
         try {
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            int v = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, 33);
-            if (v < 0) v = 0;
-            if (v > 100) v = 100;
-            return v;
+            int attenuation = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, 33);
+            if (attenuation < 0) attenuation = 0;
+            if (attenuation > 100) attenuation = 100;
+            int loudness = 100 - attenuation;
+            if (loudness < 0) loudness = 0;
+            if (loudness > 100) loudness = 100;
+            return loudness;
         } catch (Throwable t) {
             Log.w(TAG, "Unable to read floppy sound volume pref: " + t);
             return 33;
         }
     }
 
+    private int getEmulatorSoundVolumePref() {
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            int attenuation;
+            if (p.contains(UaeOptionKeys.UAE_SOUND_VOLUME_MASTER)) {
+                attenuation = p.getInt(UaeOptionKeys.UAE_SOUND_VOLUME_MASTER, 0);
+            } else {
+                attenuation = p.getInt(UaeOptionKeys.UAE_SOUND_VOLUME_PAULA, 0);
+            }
+            if (attenuation < 0) attenuation = 0;
+            if (attenuation > 100) attenuation = 100;
+            int loudness = 100 - attenuation;
+            if (loudness < 0) loudness = 0;
+            if (loudness > 100) loudness = 100;
+            return loudness;
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to read emulator sound volume pref: " + t);
+            return 100;
+        }
+    }
+
     private void setFloppySoundPrefs(boolean enabled, int volume) {
-        int v = Math.max(0, Math.min(100, volume));
+        int loudness = Math.max(0, Math.min(100, volume));
+        int attenuation = 100 - loudness;
         try {
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
             p.edit()
                 .putBoolean(UaeOptionKeys.UAE_FLOPPY_SOUND_ENABLED, enabled)
-                .putInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, v)
-                .putInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_EMPTY, v)
+                .putInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, attenuation)
+                .putInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_EMPTY, attenuation)
                 .apply();
         } catch (Throwable t) {
             Log.w(TAG, "Unable to save floppy sound prefs: " + t);
+        }
+    }
+
+    private void applyRuntimeFloppySound(boolean enabled, int volume) {
+        int loudness = Math.max(0, Math.min(100, volume));
+        int runtimePercent = enabled ? loudness : 0;
+        try {
+            nativeSetFloppySoundVolumePercent(runtimePercent);
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to apply runtime floppy sound settings: " + t);
+        }
+    }
+
+    private void setEmulatorSoundPrefs(int volume) {
+        int loudness = Math.max(0, Math.min(100, volume));
+        int attenuation = 100 - loudness;
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            p.edit().putInt(UaeOptionKeys.UAE_SOUND_VOLUME_MASTER, attenuation).apply();
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to save emulator sound prefs: " + t);
+        }
+    }
+
+    private void applyRuntimeEmulatorSound(int volume) {
+        int loudness = Math.max(0, Math.min(100, volume));
+        try {
+            nativeSetEmulatorSoundVolumePercent(loudness);
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to apply runtime emulator sound settings: " + t);
         }
     }
 
@@ -1622,9 +1835,13 @@ public class AmiberryActivity extends SDLActivity {
     }
 
     private void showFloppySoundDialog(Button btnFloppySoundQuick) {
+        final boolean originalEnabled = getFloppySoundEnabledPref();
+        final int originalDriveVolume = getFloppySoundVolumePref();
+        final int originalEmuVolume = getEmulatorSoundVolumePref();
+
         final Switch swEnabled = new Switch(this);
         swEnabled.setText("Drive sounds enabled");
-        swEnabled.setChecked(getFloppySoundEnabledPref());
+        swEnabled.setChecked(originalEnabled);
 
         final TextView tvLevel = new TextView(this);
         tvLevel.setTextColor(0xFFFFFFFF);
@@ -1632,13 +1849,60 @@ public class AmiberryActivity extends SDLActivity {
 
         final SeekBar sbLevel = new SeekBar(this);
         sbLevel.setMax(100);
-        int currentVolume = getFloppySoundVolumePref();
+        int currentVolume = originalDriveVolume;
         sbLevel.setProgress(currentVolume);
-        tvLevel.setText("Drive sound level: " + currentVolume + "%");
+
+        final Runnable updateDriveLevelLabel = () -> {
+            int progress = sbLevel.getProgress();
+            if (swEnabled.isChecked()) {
+                tvLevel.setText("Drive sound level: " + progress + "%");
+            } else {
+                tvLevel.setText("Drive sound level: 0% (muted)");
+            }
+        };
+
+        updateDriveLevelLabel.run();
         sbLevel.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                tvLevel.setText("Drive sound level: " + progress + "%");
+                updateDriveLevelLabel.run();
+                if (fromUser) {
+                    applyRuntimeFloppySound(swEnabled.isChecked(), progress);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+
+        swEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            updateDriveLevelLabel.run();
+            applyRuntimeFloppySound(isChecked, sbLevel.getProgress());
+        });
+
+        final TextView tvEmuLevel = new TextView(this);
+        tvEmuLevel.setTextColor(0xFFFFFFFF);
+        tvEmuLevel.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+
+        final SeekBar sbEmuLevel = new SeekBar(this);
+        sbEmuLevel.setMax(100);
+        int currentEmuVolume = originalEmuVolume;
+        sbEmuLevel.setProgress(currentEmuVolume);
+        if (currentEmuVolume <= 0) {
+            tvEmuLevel.setText("Emulator sound level: 0% (muted)");
+        } else {
+            tvEmuLevel.setText("Emulator sound level: " + currentEmuVolume + "%");
+        }
+        sbEmuLevel.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (progress <= 0) {
+                    tvEmuLevel.setText("Emulator sound level: 0% (muted)");
+                } else {
+                    tvEmuLevel.setText("Emulator sound level: " + progress + "%");
+                }
+                if (fromUser) {
+                    applyRuntimeEmulatorSound(progress);
+                }
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
@@ -1651,19 +1915,29 @@ public class AmiberryActivity extends SDLActivity {
         root.addView(swEnabled);
         root.addView(tvLevel);
         root.addView(sbLevel);
+        root.addView(tvEmuLevel);
+        root.addView(sbEmuLevel);
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
             .setTitle("Drive Sounds")
             .setView(root)
-            .setNegativeButton("Cancel", null)
-            .setPositiveButton("Apply", (dialog, which) -> {
-                boolean enabled = swEnabled.isChecked();
-                int volume = sbLevel.getProgress();
-                setFloppySoundPrefs(enabled, volume);
-                updateFloppySoundButtonLabel(btnFloppySoundQuick, enabled);
-                android.widget.Toast.makeText(this, "Drive sound settings saved — takes effect on next launch", android.widget.Toast.LENGTH_SHORT).show();
+            .setNegativeButton("Cancel", (d, w) -> {
+                applyRuntimeFloppySound(originalEnabled, originalDriveVolume);
+                applyRuntimeEmulatorSound(originalEmuVolume);
             })
-            .show();
+            .setPositiveButton("Apply", (dlg, which) -> {
+                boolean enabled = swEnabled.isChecked();
+                int driveVolume = sbLevel.getProgress();
+                int emuVolume = sbEmuLevel.getProgress();
+                setFloppySoundPrefs(enabled, driveVolume);
+                applyRuntimeFloppySound(enabled, driveVolume);
+                setEmulatorSoundPrefs(emuVolume);
+                applyRuntimeEmulatorSound(emuVolume);
+                updateFloppySoundButtonLabel(btnFloppySoundQuick, enabled);
+                android.widget.Toast.makeText(this, "Drive sound settings applied", android.widget.Toast.LENGTH_SHORT).show();
+            })
+            .create();
+        dialog.show();
     }
 
     private void addInEmulatorMenuButton() {
@@ -1724,12 +1998,10 @@ public class AmiberryActivity extends SDLActivity {
         final Button btnInputMap = createMenuButton("🎮  Input Mapping", d, 0xFF2E7D32); // Green
         final Button btnReset = createMenuButton("🔄  Soft Reset", d, 0xFFC62828);    // Red
         final Button btnRestart = createMenuButton("🔁  Cold Restart", d, 0xFF7B1FA2); // Deep purple
-        final Button btnAspect = createMenuButton("📺  Aspect: 16:9", d, 0xFF00838F); // Teal
         int runtimeAspectMode = getSavedVideoAspectMode();
         try {
             runtimeAspectMode = normalizeVideoAspectMode(nativeGetVideoAspectMode());
         } catch (Throwable ignored) {}
-        updateAspectButtonLabel(btnAspect, runtimeAspectMode);
 
         final Button btnAspectQuick = new Button(this);
         styleOverlayButton(btnAspectQuick);
@@ -1874,7 +2146,6 @@ public class AmiberryActivity extends SDLActivity {
         menuPanel.addView(btnInputMap, lpBtn);
         menuPanel.addView(btnReset, lpBtn);
         menuPanel.addView(btnRestart, lpBtn);
-        menuPanel.addView(btnAspect, lpBtn);
 
         // Position hamburger at bottom-left
         final FrameLayout.LayoutParams lpHamburger = new FrameLayout.LayoutParams(
@@ -2014,7 +2285,11 @@ public class AmiberryActivity extends SDLActivity {
             mPausedByOverlay = false;
             try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             try {
-                Intent i = new Intent(this, InputMappingActivity.class);
+                Intent i = new Intent(this, JoyMappingActivity.class);
+                String gid = getGameIdentifier();
+                if (gid != null) {
+                    i.putExtra(JoyMappingActivity.EXTRA_GAME_IDENTIFIER, gid);
+                }
                 startActivity(i);
             } catch (Throwable t) {
                 Log.w(TAG, "Unable to open Input Mapping: " + t);
@@ -2042,20 +2317,6 @@ public class AmiberryActivity extends SDLActivity {
             coldRestartToSetupGui();
         });
 
-        btnAspect.setOnClickListener(v -> {
-            int current = getSavedVideoAspectMode();
-            try {
-                current = normalizeVideoAspectMode(nativeGetVideoAspectMode());
-            } catch (Throwable ignored) {}
-            final int next = current == 0 ? 1 : 0;
-            applyVideoAspectModeRuntime(next);
-            updateAspectButtonLabel(btnAspect, next);
-            updateAspectButtonLabel(btnAspectQuick, next);
-            android.widget.Toast.makeText(this,
-                next == 0 ? "Video aspect: 4:3" : "Video aspect: 16:9",
-                android.widget.Toast.LENGTH_SHORT).show();
-        });
-
         btnAspectQuick.setOnClickListener(v -> {
             int current = getSavedVideoAspectMode();
             try {
@@ -2063,7 +2324,6 @@ public class AmiberryActivity extends SDLActivity {
             } catch (Throwable ignored) {}
             final int next = current == 0 ? 1 : 0;
             applyVideoAspectModeRuntime(next);
-            updateAspectButtonLabel(btnAspect, next);
             updateAspectButtonLabel(btnAspectQuick, next);
             android.widget.Toast.makeText(this,
                 next == 0 ? "Video aspect: 4:3" : "Video aspect: 16:9",
@@ -2723,6 +2983,15 @@ public class AmiberryActivity extends SDLActivity {
             logI("Using forced WHDLoad file from intent: " + mWHDLoadFile);
         }
 
+        try {
+            Intent intent = getIntent();
+            if (intent != null) {
+                String src = intent.getStringExtra(EXTRA_DF0_SOURCE_NAME);
+                mDf0SourceName = (src == null || src.trim().isEmpty()) ? null : src.trim();
+            }
+        } catch (Throwable ignored) {
+        }
+
         // Ensure VKBD graphics are available under get_data_path()/vkbd/ before runtime toggle.
         provisionVkbdAssetsIfPossible();
         provisionFloppySoundsIfPossible();
@@ -2894,6 +3163,8 @@ public class AmiberryActivity extends SDLActivity {
     public static native boolean nativeGetStretchToFill();
     public static native void nativeSetVideoAspectMode(int mode);
     public static native void nativeSetVirtualJoystickEnabled(boolean enabled);
+    public static native void nativeSetFloppySoundVolumePercent(int percent);
+    public static native void nativeSetEmulatorSoundVolumePercent(int percent);
     public static native int nativeGetVideoAspectMode();
 
     // Hot-swap a floppy image in the running emulator.
@@ -3391,6 +3662,12 @@ public class AmiberryActivity extends SDLActivity {
             args.add("sound_stereo_swap_ahi=" + (v ? "true" : "false"));
         }
 
+        if (p.contains(UaeOptionKeys.UAE_SOUND_VOLUME_MASTER)) {
+            int v = p.getInt(UaeOptionKeys.UAE_SOUND_VOLUME_MASTER, 0);
+            args.add("-s");
+            args.add("sound_volume=" + v);
+        }
+
         if (p.contains(UaeOptionKeys.UAE_SOUND_VOLUME_PAULA)) {
             int v = p.getInt(UaeOptionKeys.UAE_SOUND_VOLUME_PAULA, 0);
             args.add("-s");
@@ -3489,7 +3766,10 @@ public class AmiberryActivity extends SDLActivity {
         }
 
         // External gamepad per-button mapping to Amiga Joystick/CD32 events.
-        addAndroidJoyMappingsFromPrefs(args, p);
+        // Per-game overrides take priority over global defaults.
+        SharedPreferences perGamePrefs = getSharedPreferences(JoyMappingActivity.PREFS_PER_GAME, MODE_PRIVATE);
+        String gameId = getGameIdentifier();
+        addAndroidJoyMappingsFromPrefs(args, p, perGamePrefs, gameId);
 
         // Drives / CD overrides
         // CD image (cdimage0) is supported by Amiberry (see amiberry_whdbooter.cpp) in the form:
@@ -4197,6 +4477,24 @@ public class AmiberryActivity extends SDLActivity {
     }
 
     private void configureFloppySourcesFromPrefs() {
+        boolean isCdOnlyQuickstart = false;
+        try {
+            if (mQsModel != null) {
+                String m = mQsModel.trim().toUpperCase();
+                isCdOnlyQuickstart = "CD32".equals(m) || "CDTV".equals(m) || "ALG".equals(m) || "ARCADIA".equals(m);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        if (isCdOnlyQuickstart) {
+            mDf0DiskImagePath = null;
+            mDf1DiskImagePath = null;
+            mDf2DiskImagePath = null;
+            mDf3DiskImagePath = null;
+            logI("CD-only quickstart model; skipping floppy path restore from prefs.");
+            return;
+        }
+
         final SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 
         if (mDf0DiskImagePath == null || mDf0DiskImagePath.trim().isEmpty()) {

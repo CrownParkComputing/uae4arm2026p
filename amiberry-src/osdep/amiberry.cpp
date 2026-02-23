@@ -1710,6 +1710,8 @@ static void handle_controller_button_event(const SDL_Event& event)
 			const didata* did = &di_joystick[id];
 			if (did->name.empty() || did->joystick_id != event.caxis.which || did->mapping.is_retroarch || !did->is_controller) continue;
 
+			if (state)
+				write_log("[DIAG] handle_controller_button: matched dev=%d button=%d state=%d\n", id, button, state);
 			read_controller_button(id, button, state);
 			break;
 		}
@@ -1744,6 +1746,8 @@ static void handle_joy_button_event(const SDL_Event& event)
 			break;
 		}
 
+		if (state)
+			write_log("[DIAG] handle_joy_button: matched dev=%d button=%d state=%d (joystick path)\n", id, button, state);
 		read_joystick_buttons(id);
 		return;
 	}

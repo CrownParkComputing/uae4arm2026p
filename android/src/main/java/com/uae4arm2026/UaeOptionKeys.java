@@ -36,6 +36,7 @@ public final class UaeOptionKeys {
     public static final String UAE_SOUND_SWAP_PAULA = "uae_sound_swap_paula"; // boolean (sound_stereo_swap_paula)
     public static final String UAE_SOUND_SWAP_AHI = "uae_sound_swap_ahi"; // boolean (sound_stereo_swap_ahi)
 
+    public static final String UAE_SOUND_VOLUME_MASTER = "uae_sound_volume_master"; // int (sound_volume)
     public static final String UAE_SOUND_VOLUME_PAULA = "uae_sound_volume_paula"; // int (sound_volume_paula)
     public static final String UAE_SOUND_VOLUME_CD = "uae_sound_volume_cd"; // int (sound_volume_cd)
     public static final String UAE_SOUND_VOLUME_AHI = "uae_sound_volume_ahi"; // int (sound_volume_ahi)

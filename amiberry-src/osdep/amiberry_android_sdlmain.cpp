@@ -320,6 +320,20 @@ Java_com_uae4arm2026_AmiberryActivity_nativeSetFloppySoundVolumePercent(JNIEnv*,
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetEmulatorSoundVolumePercent(JNIEnv*, jclass, jint percent)
+{
+	int p = (int)percent;
+	if (p < 0)
+		p = 0;
+	if (p > 100)
+		p = 100;
+
+	const int attenuation = 100 - p;
+	changed_prefs.sound_volume_master = attenuation;
+	set_config_changed();
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_uae4arm2026_AmiberryActivity_nativeSetVirtualJoystickEnabled(JNIEnv*, jclass, jboolean enabled)
 {
 	g_amiberry_virtual_joy_enabled.store(enabled == JNI_TRUE ? 1 : 0, std::memory_order_relaxed);

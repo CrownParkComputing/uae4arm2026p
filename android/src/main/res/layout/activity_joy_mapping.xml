@@ -2,29 +2,53 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#FF202020"
+    android:background="#FF1A1A1A"
     android:orientation="vertical"
-    android:padding="16dp">
+    android:padding="12dp">
 
+    <!-- Title -->
     <TextView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="8dp"
-        android:text="Joy Mapping"
+        android:paddingBottom="2dp"
+        android:text="Controller Mapper"
         android:textColor="#FFFFFF"
-        android:textSize="24sp"
+        android:textSize="22sp"
         android:textStyle="bold" />
 
+    <!-- Scope (per-game or global) -->
     <TextView
+        android:id="@+id/tvJoyMapScope"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:paddingBottom="12dp"
-        android:text="Map external controller buttons to Amiga Joystick/CD32 actions"
-        android:textColor="#FFCCCCCC" />
+        android:paddingBottom="6dp"
+        android:text="Scope: Global (all games)"
+        android:textColor="#FFBBBBBB"
+        android:textSize="13sp" />
 
+    <!-- Live status area -->
+    <TextView
+        android:id="@+id/tvJoyMapStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:background="#FF263238"
+        android:gravity="center"
+        android:minHeight="52dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp"
+        android:text="Press any button on your controller…"
+        android:textColor="#FF80CBC4"
+        android:textSize="15sp"
+        android:textStyle="italic" />
+
+    <!-- Button mapping rows -->
     <ScrollView
+        android:id="@+id/mappingScroll"
         android:layout_width="match_parent"
         android:layout_height="0dp"
+        android:layout_marginTop="6dp"
         android:layout_weight="1"
         android:fillViewport="true">
 
@@ -32,12 +56,15 @@
             android:id="@+id/mappingContainer"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical" />
+            android:orientation="vertical"
+            android:paddingBottom="8dp" />
     </ScrollView>
 
+    <!-- Bottom bar -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
         android:orientation="horizontal">
 
         <Button
@@ -46,6 +73,13 @@
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="Back" />
+
+        <Button
+            android:id="@+id/btnJoyMapReset"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Reset" />
 
         <Button
             android:id="@+id/btnJoyMapSave"

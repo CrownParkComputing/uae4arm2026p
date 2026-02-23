@@ -1729,6 +1729,9 @@ public class BootstrapActivity extends Activity {
                 }
 
                 i.putExtra(AmiberryActivity.EXTRA_DF0_DISK_FILE, df0);
+                if (mDf0SourceName != null && !mDf0SourceName.trim().isEmpty()) {
+                    i.putExtra(AmiberryActivity.EXTRA_DF0_SOURCE_NAME, mDf0SourceName.trim());
+                }
                 i.putExtra(AmiberryActivity.EXTRA_DF1_DISK_FILE, df1);
                 i.putExtra(AmiberryActivity.EXTRA_DF2_DISK_FILE, df2);
                 i.putExtra(AmiberryActivity.EXTRA_DF3_DISK_FILE, df3);
@@ -3331,6 +3334,15 @@ public class BootstrapActivity extends Activity {
         } catch (Throwable ignored) {
         }
 
+        // Ensure the current launcher media picks are written to UAE prefs before
+        // we snapshot/save configs (Last Ran + auto-named config).
+        try {
+            if (!mLaunchedFromEmulatorMenu) {
+                syncBootMediumToUaePrefs();
+            }
+        } catch (Throwable ignored) {
+        }
+
         // Ensure ROM overrides in prefs reflect the current Quickstart selections.
         // AmiberryActivity builds its final CLI args from UAE prefs (including kickstart_ext_rom_file).
         try {
@@ -3376,6 +3388,17 @@ public class BootstrapActivity extends Activity {
         } catch (Throwable ignored) {
         }
 
+        // Also keep a media/game-named snapshot so users can find configs by title,
+        // not only "Last Ran (auto)".
+        try {
+            String autoName = guessConfigName();
+            if (autoName != null) autoName = autoName.trim();
+            if (autoName != null && !autoName.isEmpty()) {
+                ConfigStorage.saveConfig(this, autoName);
+            }
+        } catch (Throwable ignored) {
+        }
+
         // Avoid unexpected DF0 insertion (e.g., disk.zip) when launching from the native UI.
         i.putExtra(AmiberryActivity.EXTRA_ENABLE_AUTO_DF0, false);
 
@@ -3398,6 +3421,9 @@ public class BootstrapActivity extends Activity {
             }
             if (df0LaunchPath != null) {
                 i.putExtra(AmiberryActivity.EXTRA_DF0_DISK_FILE, df0LaunchPath);
+                if (mDf0SourceName != null && !mDf0SourceName.trim().isEmpty()) {
+                    i.putExtra(AmiberryActivity.EXTRA_DF0_SOURCE_NAME, mDf0SourceName.trim());
+                }
             }
 
             String df1LaunchPath = null;
@@ -5472,6 +5498,15 @@ public class BootstrapActivity extends Activity {
         Button btnHelp = findViewById(R.id.btnHelp);
         if (btnHelp != null) btnHelp.setOnClickListener(v -> startActivity(new Intent(this, HelpActivity.class)));
 
+        Button btnSetup = findViewById(R.id.btnSetup);
+        if (btnSetup != null) {
+            btnSetup.setOnClickListener(v -> {
+                Intent i = new Intent(this, WalkthroughActivity.class);
+                i.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
+                startActivity(i);
+            });
+        }
+
         // Quick access buttons in the Model panel.
         Button btnModelCpuFpu = findViewById(R.id.btnModelCpuFpu);
         if (btnModelCpuFpu != null) btnModelCpuFpu.setOnClickListener(v -> startActivity(new Intent(this, CpuFpuOptionsActivity.class)));
@@ -6725,6 +6760,13 @@ public class BootstrapActivity extends Activity {
             .setMessage("Save current Quickstart settings as a config file")
             .setView(input)
             .setPositiveButton("Save", (d, which) -> {
+                try {
+                    if (!mLaunchedFromEmulatorMenu) {
+                        syncBootMediumToUaePrefs();
+                    }
+                } catch (Throwable ignored) {
+                }
+
                 String name = input.getText() == null ? "" : input.getText().toString().trim();
                 if (name.isEmpty()) name = "config";
                 boolean ok = ConfigStorage.saveConfig(this, name);
@@ -7280,14 +7322,20 @@ public class BootstrapActivity extends Activity {
             String df0DisplayName = getDisplayName(uri);
             if (validateAndRejectIfWrongExtension(uri, df0DisplayName, new String[]{"adf", "zip"},
                 "Please select an Amiga floppy disk image (.adf or .zip)")) return;
-            // DF0 is special: some legacy/core flows historically use a stable "disk.zip" path
-            // as DF0. Keep DF0 swaps deterministic by always overwriting that stable file.
-            File dest = new File(disksDir, "disk.zip");
+            // Use the picked filename (prefixed for DF0) so saved configs preserve
+            // the actual media identity instead of a generic "disk.zip".
+            File dest = guessDestFileForUri(uri, disksDir, "df0");
             LogUtil.i(TAG, "Importing DF0 from URI: " + uri + " -> " + dest.getAbsolutePath());
             if (importToFile(uri, dest)) {
                 LogUtil.i(TAG, "Imported DF0 to: " + dest.getAbsolutePath() + " (len=" + dest.length() + " mtime=" + dest.lastModified() + ")");
-                // Remove any older DF0-import variants to avoid ambiguity and storage growth.
-                clearByPrefix(disksDir, "df0");
+                // Keep prior DF0 imports so older saved configs still reference valid files.
+                try {
+                    File legacyDf0 = new File(disksDir, "disk.zip");
+                    if (!legacyDf0.equals(dest)) {
+                        clearFile(legacyDf0);
+                    }
+                } catch (Throwable ignored) {
+                }
                 mSelectedDf0 = dest;
                 mSelectedDf0Path = null;
                 String src = getDisplayName(uri);
@@ -7315,7 +7363,6 @@ public class BootstrapActivity extends Activity {
             LogUtil.i(TAG, "Importing DF1 from URI: " + uri + " -> " + dest.getAbsolutePath());
             if (importToFile(uri, dest)) {
                 LogUtil.i(TAG, "Imported DF1 to: " + dest.getAbsolutePath());
-                clearByPrefixExcept(disksDir, "df1", dest);
                 mSelectedDf1 = dest;
                 mSelectedDf1Path = null;
                 String src = getDisplayName(uri);
@@ -7345,7 +7392,6 @@ public class BootstrapActivity extends Activity {
             LogUtil.i(TAG, "Importing DF2 from URI: " + uri + " -> " + dest.getAbsolutePath());
             if (importToFile(uri, dest)) {
                 LogUtil.i(TAG, "Imported DF2 to: " + dest.getAbsolutePath());
-                clearByPrefixExcept(disksDir, "df2", dest);
                 mSelectedDf2 = dest;
                 mSelectedDf2Path = null;
                 String src = getDisplayName(uri);
@@ -7377,7 +7423,6 @@ public class BootstrapActivity extends Activity {
             LogUtil.i(TAG, "Importing DF3 from URI: " + uri + " -> " + dest.getAbsolutePath());
             if (importToFile(uri, dest)) {
                 LogUtil.i(TAG, "Imported DF3 to: " + dest.getAbsolutePath());
-                clearByPrefixExcept(disksDir, "df3", dest);
                 mSelectedDf3 = dest;
                 mSelectedDf3Path = null;
                 String src = getDisplayName(uri);

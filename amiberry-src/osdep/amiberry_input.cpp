@@ -1309,16 +1309,22 @@ static int init_joystick()
 		{
 			open_as_game_controller(did, i);
 			setup_controller_mappings(did, i);
+			write_log("[DIAG] init_joystick: dev %d opened as GameController, is_controller=%d\n", i, did->is_controller ? 1 : 0);
 		}
 		// Controller interface not supported, try to open as joystick
 		else
 		{
 			open_as_joystick(did, i);
+			write_log("[DIAG] init_joystick: dev %d opened as Joystick (NOT GameController), is_controller=%d\n", i, did->is_controller ? 1 : 0);
 			write_log("Joystick #%i does not have a mapping available\n", did->joystick_id);
 		}
 
 		fix_didata(did);
 		setup_mapping(did, controllers, i);
+		// Log custom mapping state after setup
+		write_log("[DIAG] init_joystick: dev %d after setup: custom_none[0]=%d custom_none[1]=%d custom_none[11]=%d\n",
+			i, did->mapping.amiberry_custom_none[0], did->mapping.amiberry_custom_none[1],
+			did->mapping.amiberry_custom_none[11]);
 	}
 	return 1;
 }
@@ -1328,21 +1334,38 @@ bool load_custom_options(uae_prefs* p, const std::string& option, const TCHAR* v
 	// Only do this loop if the option starts with "joyport"
 	if (option.rfind("joyport", 0) == 0)
 	{
+		write_log("load_custom_options: option='%s' value='%s'\n", option.c_str(), value);
 		std::string buffer;
 
 		for (int i = 0; i < MAX_JPORTS; ++i)
 		{
 			const jport *jp = &p->jports[i];
 
-			// Check if configname contains JOY0, JOY1, JOY2, or JOY3
+			// Determine which physical joystick device is bound to this port.
+			// First try configname (e.g. "JOY0"), then fall back to shortid
+			// (e.g. "joy0") which is set by -s joyportN=joy0 on Android.
 			int joy_index = -1;
+			write_log("  port %d: configname='%s' shortid='%s' id=%d\n",
+				i, jp->idc.configname, jp->idc.shortid, jp->id);
 			if (jp->idc.configname[0] && strncmp(jp->idc.configname, "JOY", 3) == 0 &&
 				jp->idc.configname[4] == '\0' &&
 				jp->idc.configname[3] >= '0' && jp->idc.configname[3] <= '3') {
 				joy_index = jp->idc.configname[3] - '0';
+				write_log("  port %d: configname matched -> joy_index=%d\n", i, joy_index);
+			}
+			// Fallback: parse shortid (set by -s joyportN=joyM)
+			if (joy_index == -1 && jp->idc.shortid[0]) {
+				if (_tcsnicmp(jp->idc.shortid, _T("joy"), 3) == 0 &&
+					jp->idc.shortid[3] >= '0' && jp->idc.shortid[3] <= '3' &&
+					jp->idc.shortid[4] == '\0') {
+					joy_index = jp->idc.shortid[3] - '0';
+					write_log("  port %d: shortid matched -> joy_index=%d\n", i, joy_index);
 				}
-			if (joy_index == -1)
+			}
+			if (joy_index == -1) {
+				write_log("  port %d: no match, skipping\n", i);
 				continue;
+			}
 
 			didata* did = &di_joystick[joy_index];
 
@@ -1354,7 +1377,10 @@ bool load_custom_options(uae_prefs* p, const std::string& option, const TCHAR* v
 					buffer = "joyport" + std::to_string(i) + "_amiberry_custom_" + mode + "_" + SDL_GameControllerGetStringForButton(static_cast<SDL_GameControllerButton>(n));
 					if (buffer == option)
 					{
-						const auto b = (find_inputevent(value) > -1) ? remap_event_list[find_inputevent(value)] : 0;
+						const auto evt_idx = find_inputevent(value);
+						const auto b = (evt_idx > -1) ? remap_event_list[evt_idx] : 0;
+						write_log("  MATCH: port=%d joy_index=%d button=%d event_idx=%d event_id=%d value='%s'\n",
+							i, joy_index, n, evt_idx, b, value);
 						if (m == 0)
 							did->mapping.amiberry_custom_none[n] = b;
 						else
@@ -1368,7 +1394,10 @@ bool load_custom_options(uae_prefs* p, const std::string& option, const TCHAR* v
 					buffer = "joyport" + std::to_string(i) + "_amiberry_custom_axis_" + mode + "_" + SDL_GameControllerGetStringForAxis(static_cast<SDL_GameControllerAxis>(n));
 					if (buffer == option)
 					{
-						const auto b = (find_inputevent(value) > -1) ? remap_event_list[find_inputevent(value)] : 0;
+						const auto evt_idx = find_inputevent(value);
+						const auto b = (evt_idx > -1) ? remap_event_list[evt_idx] : 0;
+						write_log("  AXIS MATCH: port=%d joy_index=%d axis=%d event_idx=%d event_id=%d\n",
+							i, joy_index, n, evt_idx, b);
 						if (m == 0)
 							did->mapping.amiberry_custom_axis_none[n] = b;
 						else
@@ -1378,6 +1407,7 @@ bool load_custom_options(uae_prefs* p, const std::string& option, const TCHAR* v
 				}
 			}
 		}
+		write_log("load_custom_options: no port matched for '%s'\n", option.c_str());
 	}
 
 	return false;
@@ -1558,6 +1588,9 @@ void read_controller_button(const int id, const int button, const int state)
 {
 	const didata* did = &di_joystick[id];
 
+	if (state)
+		write_log("[DIAG] read_controller_button: id=%d button=%d state=%d is_controller=%d\n", id, button, state, did->is_controller ? 1 : 0);
+
 	if (isfocus() || currprefs.inactive_input & 4)
 	{
 		auto held_offset = 0;
@@ -1573,6 +1606,8 @@ void read_controller_button(const int id, const int button, const int state)
 		set_button_state(did, id, did->mapping.reset_button, retroarch_offset + 3, true);
 		set_button_state(did, id, did->mapping.vkbd_button, retroarch_offset + 4, true);
 
+		if (state)
+			write_log("[DIAG]   -> setjoybuttonstate(%d, %d, %d)\n", id, button + held_offset, state);
 		setjoybuttonstate(id, button + held_offset, state);
 	}
 }
@@ -1625,27 +1660,11 @@ void read_joystick_buttons(const int id)
 			if (did->mapping.button[did_button] != SDL_CONTROLLER_BUTTON_INVALID)
 			{
 				const int did_state = SDL_JoystickGetButton(did->joystick, did->mapping.button[did_button]) & 1;
-				//if (did->buttonaxisparent[did_button] >= 0)
-				//{
-				//	int bstate;
-				//	const int axis = did->buttonaxisparent[did_button];
-				//	const int dir = did->buttonaxisparentdir[did_button];
-
-				//	const int data = SDL_JoystickGetAxis(did->joystick, axis);
-				//	if (dir)
-				//		bstate = data > joystick_dead_zone ? 1 : 0;
-				//	else
-				//		bstate = data < -joystick_dead_zone ? 1 : 0;
-
-				//	if (axisold[id][did_button] != bstate) {
-				//		setjoybuttonstate(id, did_button, bstate);
-				//		axisold[id][did_button] = bstate;
-				//	}
-				//}
-				//else
-				//{
-					setjoybuttonstate(id, did_button + held_offset, did_state);
-				//}
+				if (did_state) {
+					write_log("[DIAG] read_joystick_buttons: id=%d did_button=%d raw_btn=%d state=%d\n",
+						id, did_button, did->mapping.button[did_button], did_state);
+				}
+				setjoybuttonstate(id, did_button + held_offset, did_state);
 			}
 		}
 	}
@@ -1862,13 +1881,22 @@ int input_get_default_joystick(struct uae_input_device* uid, int i, int port, in
 	}
 
 	// Set the events for any Custom Controls mapping
+	write_log("[DIAG] input_get_default_joystick: dev=%d port=%d mode=%d num_joystick=%d\n", i, port, mode, num_joystick);
+	for (int db = 0; db < SDL_CONTROLLER_BUTTON_MAX; db++) {
+		if (button_map[0][db])
+			write_log("[DIAG]   custom_none[%d] = %d (event)\n", db, button_map[0][db]);
+	}
 	for (auto n = 0; n < 2; ++n)
 	{
 		const auto function_offset = n * REMAP_BUTTONS;
 		for (int button = 0; button < SDL_CONTROLLER_BUTTON_MAX; button++)
 		{
 			if (button_map[n][button])
+			{
+				write_log("[DIAG]   setid: slot=%d port=%d event=%d (n=%d)\n",
+					ID_BUTTON_OFFSET + button + function_offset, port, button_map[n][button], n);
 				setid(uid, i, ID_BUTTON_OFFSET + button + function_offset, 0, port, button_map[n][button], af, gp);
+			}
 		}
 
 		// Axis mapping, skip the first 2 (Horizontal / Vertical on Left stick)

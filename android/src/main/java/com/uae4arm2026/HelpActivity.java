@@ -47,10 +47,9 @@ public class HelpActivity extends Activity {
         Button btnRerunWalkthrough = findViewById(R.id.btnRerunWalkthrough);
         if (btnRerunWalkthrough != null) {
             btnRerunWalkthrough.setOnClickListener(v -> {
-                // Reset the walkthrough completed flag and launch the walkthrough
-                SharedPreferences prefs = getSharedPreferences("bootstrap", MODE_PRIVATE);
-                prefs.edit().putBoolean("walkthrough_completed", false).apply();
-                startActivity(new Intent(this, WalkthroughActivity.class));
+                Intent i = new Intent(this, WalkthroughActivity.class);
+                i.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
+                startActivity(i);
                 finish();
             });
         }

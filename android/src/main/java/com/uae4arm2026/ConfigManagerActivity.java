@@ -15,6 +15,7 @@ import android.widget.Toast;
 
 import java.util.ArrayList;
 import java.util.List;
+import android.content.SharedPreferences;
 
 public class ConfigManagerActivity extends Activity {
 
@@ -255,9 +256,23 @@ public class ConfigManagerActivity extends Activity {
         }
 
         Intent i = new Intent(this, AmiberryActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
 
         // Avoid unexpected DF0 insertion (e.g., disk.zip) when launching from the native UI.
         i.putExtra(AmiberryActivity.EXTRA_ENABLE_AUTO_DF0, false);
+
+        // AmiberryActivity is singleTask. If an existing emulator instance is alive,
+        // this intent arrives in onNewIntent(); request a restart and force DF0-DF3
+        // from the loaded config prefs so prior in-memory media cannot win.
+        i.putExtra(AmiberryActivity.EXTRA_REQUEST_RESTART, true);
+        try {
+            SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            i.putExtra(AmiberryActivity.EXTRA_DF0_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF0_PATH, ""));
+            i.putExtra(AmiberryActivity.EXTRA_DF1_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF1_PATH, ""));
+            i.putExtra(AmiberryActivity.EXTRA_DF2_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF2_PATH, ""));
+            i.putExtra(AmiberryActivity.EXTRA_DF3_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF3_PATH, ""));
+        } catch (Throwable ignored) {
+        }
 
         // Enable core logging in debug builds so we can diagnose boot issues.
         final boolean debuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
