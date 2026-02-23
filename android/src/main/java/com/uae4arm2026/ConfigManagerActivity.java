@@ -271,21 +271,13 @@ public class ConfigManagerActivity extends Activity {
             i.putExtra(AmiberryActivity.EXTRA_DF1_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF1_PATH, ""));
             i.putExtra(AmiberryActivity.EXTRA_DF2_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF2_PATH, ""));
             i.putExtra(AmiberryActivity.EXTRA_DF3_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF3_PATH, ""));
-
-            // Pass the Quickstart model loaded from the config so the emulator boots with the
-            // correct machine baseline (chipset, CPU, memory defaults), regardless of which
-            // model was previously selected in the launcher UI.
             String qsModel = prefs.getString("qs_model", null);
-            if (qsModel != null) qsModel = qsModel.trim();
-            if (qsModel != null && !qsModel.isEmpty()) {
-                i.putExtra(AmiberryActivity.EXTRA_QS_MODEL, qsModel);
-                i.putExtra(AmiberryActivity.EXTRA_QS_CONFIG_INDEX, prefs.getInt("qs_config", 0));
-                // NTSC state is applied via the uae_ntsc/-s override; hardcode false here to
-                // avoid Amiberry's internal Quickstart dialog triggering NTSC mode.
-                i.putExtra(AmiberryActivity.EXTRA_QS_NTSC, false);
-                // Keep native-menu behavior: do not activate Amiberry's built-in GUI Quickstart mode.
-                i.putExtra(AmiberryActivity.EXTRA_QS_MODE, false);
+            if (qsModel != null && !qsModel.trim().isEmpty()) {
+                i.putExtra(AmiberryActivity.EXTRA_QS_MODEL, qsModel.trim());
             }
+            i.putExtra(AmiberryActivity.EXTRA_QS_CONFIG_INDEX, prefs.getInt("qs_config", 0));
+            i.putExtra(AmiberryActivity.EXTRA_QS_NTSC, false);
+            i.putExtra(AmiberryActivity.EXTRA_QS_MODE, false);
         } catch (Throwable ignored) {
         }
 
@@ -317,29 +309,34 @@ public class ConfigManagerActivity extends Activity {
                 try {
                     Intent i = new Intent(this, AmiberryActivity.class);
 
+                    // If the existing singleTask activity is still alive, force its onNewIntent()
+                    // restart path. If it was already killed, onCreate() consumes the same extras.
+                    i.putExtra(AmiberryActivity.EXTRA_REQUEST_RESTART, true);
+
                     // Avoid unexpected DF0 insertion (e.g., disk.zip) when launching from the native UI.
                     i.putExtra(AmiberryActivity.EXTRA_ENABLE_AUTO_DF0, false);
+
+                    try {
+                        SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                        i.putExtra(AmiberryActivity.EXTRA_DF0_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF0_PATH, ""));
+                        i.putExtra(AmiberryActivity.EXTRA_DF1_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF1_PATH, ""));
+                        i.putExtra(AmiberryActivity.EXTRA_DF2_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF2_PATH, ""));
+                        i.putExtra(AmiberryActivity.EXTRA_DF3_DISK_FILE, prefs.getString(UaeOptionKeys.UAE_DRIVE_DF3_PATH, ""));
+
+                        String qsModel = prefs.getString("qs_model", null);
+                        if (qsModel != null && !qsModel.trim().isEmpty()) {
+                            i.putExtra(AmiberryActivity.EXTRA_QS_MODEL, qsModel.trim());
+                        }
+                        i.putExtra(AmiberryActivity.EXTRA_QS_CONFIG_INDEX, prefs.getInt("qs_config", 0));
+                        i.putExtra(AmiberryActivity.EXTRA_QS_NTSC, false);
+                        i.putExtra(AmiberryActivity.EXTRA_QS_MODE, false);
+                    } catch (Throwable ignored) {
+                    }
 
                     // Enable core logging in debug builds so we can diagnose boot issues.
                     final boolean debuggable = (getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0;
                     if (debuggable) {
                         i.putExtra(AmiberryActivity.EXTRA_ENABLE_LOGFILE, true);
-                    }
-
-                    // Pass the Quickstart model so the restarted emulator uses the correct baseline.
-                    try {
-                        SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-                        String qsModel = prefs.getString("qs_model", null);
-                        if (qsModel != null) qsModel = qsModel.trim();
-                        if (qsModel != null && !qsModel.isEmpty()) {
-                            i.putExtra(AmiberryActivity.EXTRA_QS_MODEL, qsModel);
-                            i.putExtra(AmiberryActivity.EXTRA_QS_CONFIG_INDEX, prefs.getInt("qs_config", 0));
-                            // NTSC state is applied via the uae_ntsc/-s override; hardcode false here.
-                            i.putExtra(AmiberryActivity.EXTRA_QS_NTSC, false);
-                            // Do not activate Amiberry's built-in GUI Quickstart mode.
-                            i.putExtra(AmiberryActivity.EXTRA_QS_MODE, false);
-                        }
-                    } catch (Throwable ignored) {
                     }
 
                     // Native menu replaces Amiberry's GUI.

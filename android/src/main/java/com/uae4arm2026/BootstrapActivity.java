@@ -3470,7 +3470,8 @@ public class BootstrapActivity extends Activity {
     }
 
     private void clearExtRomSelection() {
-        clearByPrefix(getInternalRomsDir(), INTERNAL_EXT_ROM_PREFIX);
+        // Do not delete imported ext ROM files when toggling models.
+        // Only clear the active selection/prefs so CD32 configs can rehydrate later.
         mSelectedExt = null;
         mExtSourceName = null;
         getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
@@ -3482,8 +3483,9 @@ public class BootstrapActivity extends Activity {
     }
 
     private void clearCd0Selection() {
-        deleteRecursive(getInternalCd0Dir());
-        clearByPrefix(getInternalDisksDir(), "cdimage0");
+        // Do not delete imported media files here.
+        // Clearing selection should only unmount/forget active prefs so saved configs
+        // can still reload previously imported media.
         mSelectedCd0 = null;
         mSelectedCd0Path = null;
         mCd0SourceName = null;
@@ -3496,8 +3498,8 @@ public class BootstrapActivity extends Activity {
     }
 
     private void clearFloppySelections() {
-        clearByPrefix(getInternalDisksDir(), "df0");
-        clearByPrefix(getInternalDisksDir(), "df1");
+        // Do not delete imported floppy files here.
+        // Model/boot-medium switches must not remove backing files needed by saved configs.
         mSelectedDf0 = null;
         mSelectedDf1 = null;
         mSelectedDf0Path = null;
@@ -3513,7 +3515,7 @@ public class BootstrapActivity extends Activity {
     }
 
     private void clearDh0HdfSelection() {
-        clearByPrefix(getInternalHarddrivesDir(), INTERNAL_DH0_HDF_PREFIX);
+        // Keep imported HDF files on disk; only clear active selection/prefs.
         mSelectedDh0Hdf = null;
         mSelectedDh0HdfPath = null;
         mDh0SourceName = null;
@@ -3526,7 +3528,7 @@ public class BootstrapActivity extends Activity {
     }
 
     private void clearDh0FolderSelection() {
-        deleteRecursive(getInternalDh0Dir());
+        // Keep imported DH0 folder mirror on disk; only clear active selection/prefs.
         mSelectedDh0Dir = null;
         mDh0SourceName = null;
         getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
@@ -6403,19 +6405,6 @@ public class BootstrapActivity extends Activity {
             }
 
             applyKickstartAutoForCurrentModel(false);
-
-            // Re-read floppy and HD visibility flags from prefs so that a config loaded while
-            // this activity is paused (e.g. from ConfigManagerActivity) is reflected correctly
-            // when the activity resumes, without requiring an onCreate cycle.
-            mDf1Added = launcherPrefs.getBoolean(PREF_SHOW_DF1, false);
-            mDf2Added = launcherPrefs.getBoolean(PREF_SHOW_DF2, false);
-            mDf3Added = launcherPrefs.getBoolean(PREF_SHOW_DF3, false);
-            mDh0Added = launcherPrefs.getBoolean(PREF_SHOW_DH0, false);
-            mDh1Added = launcherPrefs.getBoolean(PREF_SHOW_DH1, false);
-            mDh2Added = launcherPrefs.getBoolean(PREF_SHOW_DH2, false);
-            mDh3Added = launcherPrefs.getBoolean(PREF_SHOW_DH3, false);
-            mDh4Added = launcherPrefs.getBoolean(PREF_SHOW_DH4, false);
-            mCd0Added = launcherPrefs.getBoolean(PREF_SHOW_CD0, false);
         } finally {
             mSuppressUiCallbacks = false;
         }
@@ -6735,32 +6724,150 @@ public class BootstrapActivity extends Activity {
     }
 
     private String guessConfigName() {
-        String[] candidates = new String[] {
-            mDf0SourceName,
-            mDf1SourceName,
-            mDh0SourceName,
-            mKickSourceName,
-            mCd0SourceName,
-        };
-        for (String c : candidates) {
-            if (c == null) continue;
-            String s = c.trim();
-            if (s.isEmpty()) continue;
-
-            // Strip common file extension.
-            int dot = s.lastIndexOf('.');
-            if (dot > 0 && dot < s.length() - 1) {
-                String ext = s.substring(dot + 1).toLowerCase(Locale.ROOT);
-                if ("zip".equals(ext) || "adf".equals(ext) || "hdf".equals(ext) || "iso".equals(ext) || "cue".equals(ext) || "ccd".equals(ext)) {
-                    s = s.substring(0, dot);
-                }
+        String modelPart = normalizeConfigNamePart(getSelectedQsPrefsId());
+        if (modelPart.isEmpty()) {
+            try {
+                SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                modelPart = normalizeConfigNamePart(p.getString(PREF_QS_MODEL, null));
+            } catch (Throwable ignored) {
             }
-
-            // If we got a URI-like label, fall back.
-            if (s.startsWith("content://") || s.startsWith("/")) continue;
-            return s;
         }
-        return "config";
+
+        String baseName;
+        if (isCdOnlyModel()) {
+            baseName = firstNonEmpty(
+                buildMediaConfigName("cdroms", mCd0SourceName, mSelectedCd0, mSelectedCd0Path),
+                buildMediaConfigName("harddrives", mDh0SourceName, mSelectedDh0Hdf, mSelectedDh0HdfPath),
+                buildMediaConfigName("harddrives", mDh1SourceName, mSelectedDh1Hdf, mSelectedDh1HdfPath),
+                buildMediaConfigName("harddrives", mDh2SourceName, mSelectedDh2Hdf, mSelectedDh2HdfPath),
+                buildMediaConfigName("harddrives", mDh3SourceName, mSelectedDh3Hdf, mSelectedDh3HdfPath),
+                buildMediaConfigName("harddrives", mDh4SourceName, mSelectedDh4Hdf, mSelectedDh4HdfPath),
+                buildMediaConfigName("floppies", mDf0SourceName, mSelectedDf0, mSelectedDf0Path),
+                buildMediaConfigName("floppies", mDf1SourceName, mSelectedDf1, mSelectedDf1Path),
+                buildMediaConfigName("floppies", mDf2SourceName, mSelectedDf2, mSelectedDf2Path),
+                buildMediaConfigName("floppies", mDf3SourceName, mSelectedDf3, mSelectedDf3Path)
+            );
+        } else {
+            baseName = firstNonEmpty(
+                buildMediaConfigName("harddrives", mDh0SourceName, mSelectedDh0Hdf, mSelectedDh0HdfPath),
+                buildMediaConfigName("harddrives", mDh1SourceName, mSelectedDh1Hdf, mSelectedDh1HdfPath),
+                buildMediaConfigName("harddrives", mDh2SourceName, mSelectedDh2Hdf, mSelectedDh2HdfPath),
+                buildMediaConfigName("harddrives", mDh3SourceName, mSelectedDh3Hdf, mSelectedDh3HdfPath),
+                buildMediaConfigName("harddrives", mDh4SourceName, mSelectedDh4Hdf, mSelectedDh4HdfPath),
+                buildMediaConfigName("floppies", mDf0SourceName, mSelectedDf0, mSelectedDf0Path),
+                buildMediaConfigName("floppies", mDf1SourceName, mSelectedDf1, mSelectedDf1Path),
+                buildMediaConfigName("floppies", mDf2SourceName, mSelectedDf2, mSelectedDf2Path),
+                buildMediaConfigName("floppies", mDf3SourceName, mSelectedDf3, mSelectedDf3Path),
+                buildMediaConfigName("cdroms", mCd0SourceName, mSelectedCd0, mSelectedCd0Path)
+            );
+        }
+
+        if (baseName == null || baseName.trim().isEmpty()) {
+            String fallback = firstNonEmpty(
+                normalizeConfigNamePart(mKickSourceName),
+                normalizeConfigNamePart(mExtSourceName)
+            );
+            baseName = fallback.isEmpty() ? "config" : fallback;
+        }
+
+        if (modelPart != null && !modelPart.isEmpty()) {
+            String lowerBase = baseName.toLowerCase(Locale.ROOT);
+            String lowerModel = modelPart.toLowerCase(Locale.ROOT);
+            if (!lowerBase.endsWith("_" + lowerModel) && !lowerBase.equals(lowerModel)) {
+                baseName = baseName + "_" + modelPart;
+            }
+        }
+
+        String cleaned = sanitizeFilename(baseName);
+        if (cleaned == null || cleaned.trim().isEmpty()) return "config";
+        return cleaned;
+    }
+
+    private String firstNonEmpty(String... values) {
+        if (values == null) return "";
+        for (String value : values) {
+            String s = safeTrim(value);
+            if (!s.isEmpty()) return s;
+        }
+        return "";
+    }
+
+    private String buildMediaConfigName(String mediaFolder, String sourceName, File selectedFile, String selectedPath) {
+        String media = resolveMediaDisplayName(sourceName, selectedFile, selectedPath);
+        String mediaPart = normalizeConfigNamePart(media);
+        if (mediaPart.isEmpty()) return "";
+        String folderPart = normalizeConfigNamePart(mediaFolder);
+        if (folderPart.isEmpty()) return mediaPart;
+        return folderPart + "_" + mediaPart;
+    }
+
+    private String resolveMediaDisplayName(String sourceName, File selectedFile, String selectedPath) {
+        String source = safeTrim(sourceName);
+        if (!source.isEmpty()) return source;
+
+        if (selectedFile != null) {
+            try {
+                String n = selectedFile.getName();
+                if (n != null && !n.trim().isEmpty()) return n.trim();
+            } catch (Throwable ignored) {
+            }
+        }
+
+        String path = safeTrim(selectedPath);
+        if (path.isEmpty()) return "";
+        if (isContentUriString(path)) {
+            try {
+                String dn = getDisplayName(Uri.parse(path));
+                if (dn != null && !dn.trim().isEmpty()) return dn.trim();
+            } catch (Throwable ignored) {
+            }
+            return "";
+        }
+
+        try {
+            File f = new File(path);
+            String n = f.getName();
+            if (n != null && !n.trim().isEmpty()) return n.trim();
+        } catch (Throwable ignored) {
+        }
+        return "";
+    }
+
+    private String normalizeConfigNamePart(String raw) {
+        String s = safeTrim(raw);
+        if (s.isEmpty()) return "";
+        s = stripKnownMediaExtension(s);
+        s = s.replaceAll("[^A-Za-z0-9._ -]", "_");
+        s = s.replaceAll("\\s+", "_");
+        s = s.replaceAll("_+", "_");
+        s = s.replaceAll("^[_ .-]+", "");
+        s = s.replaceAll("[_ .-]+$", "");
+        return s;
+    }
+
+    private String stripKnownMediaExtension(String value) {
+        String s = safeTrim(value);
+        if (s.isEmpty()) return "";
+        int dot = s.lastIndexOf('.');
+        if (dot <= 0 || dot >= s.length() - 1) return s;
+        String ext = s.substring(dot + 1).toLowerCase(Locale.ROOT);
+        if ("zip".equals(ext)
+            || "adf".equals(ext)
+            || "adz".equals(ext)
+            || "dms".equals(ext)
+            || "hdf".equals(ext)
+            || "iso".equals(ext)
+            || "cue".equals(ext)
+            || "ccd".equals(ext)
+            || "lha".equals(ext)
+            || "lzh".equals(ext)
+            || "chd".equals(ext)
+            || "bin".equals(ext)
+            || "img".equals(ext)
+            || "rom".equals(ext)) {
+            return s.substring(0, dot);
+        }
+        return s;
     }
 
     private void promptSaveConfig() {

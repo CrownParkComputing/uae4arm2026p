@@ -93,6 +93,234 @@ final class ConfigStorage {
         return k != null && (k.startsWith(PREFIX_UAE) || k.startsWith(PREFIX_QS) || isBootstrapConfigKey(k));
     }
 
+    private static String readDecodedString(Map<String, String> loaded, String key) {
+        if (loaded == null || key == null) return null;
+        String enc = loaded.get(key);
+        if (enc == null) return null;
+        String s = enc.trim();
+        if (s.startsWith("s:")) return unescape(s.substring(2)).trim();
+        return s.trim();
+    }
+
+    private static String normalizeToken(String s) {
+        if (s == null) return "";
+        return s.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
+    }
+
+    private static String stripKnownExtension(String name) {
+        if (name == null) return "";
+        String n = name.trim();
+        int dot = n.lastIndexOf('.');
+        if (dot > 0) return n.substring(0, dot);
+        return n;
+    }
+
+    private static String candidateFromConfigFilename(String filename) {
+        if (filename == null) return null;
+        String base = filename.trim();
+        String lower = base.toLowerCase(Locale.ROOT);
+        if (lower.endsWith(EXT)) base = base.substring(0, base.length() - EXT.length());
+        if (lower.endsWith(EXT_UAE)) base = base.substring(0, base.length() - EXT_UAE.length());
+
+        String b = base.toLowerCase(Locale.ROOT);
+        if (b.startsWith("floppies_")) {
+            String rest = base.substring("floppies_".length());
+            String[] modelSuffixes = new String[] {"_a500", "_a1200", "_a4000", "_cd32", "_cdtv", "_alg", "_arcadia"};
+            String restLower = rest.toLowerCase(Locale.ROOT);
+            for (String suf : modelSuffixes) {
+                if (restLower.endsWith(suf)) {
+                    return rest.substring(0, rest.length() - suf.length()).trim();
+                }
+            }
+            return rest.trim();
+        }
+        return null;
+    }
+
+    private static String findFileInJoinedOrFsDir(Context ctx, String joinedOrFsDir, String sourceName) {
+        if (ctx == null || joinedOrFsDir == null || sourceName == null) return null;
+        String dir = joinedOrFsDir.trim();
+        String wanted = sourceName.trim();
+        if (dir.isEmpty() || wanted.isEmpty()) return null;
+
+        try {
+            if (isSafJoinedPath(dir)) {
+                SafPath sp = splitSafJoinedPath(dir);
+                if (sp == null || sp.treeUri == null) return null;
+                DocumentFile root = resolveTreePath(ctx, sp.treeUri, sp.relPath, false);
+                if (root == null || !root.exists() || !root.isDirectory()) return null;
+                DocumentFile[] kids = root.listFiles();
+                if (kids == null) return null;
+                String wantedNorm = normalizeToken(stripKnownExtension(wanted));
+                for (DocumentFile kid : kids) {
+                    if (kid == null || !kid.exists() || kid.isDirectory()) continue;
+                    String n = kid.getName();
+                    if (n != null && n.equalsIgnoreCase(wanted)) {
+                        Uri u = kid.getUri();
+                        return u == null ? null : u.toString();
+                    }
+                }
+                for (DocumentFile kid : kids) {
+                    if (kid == null || !kid.exists() || kid.isDirectory()) continue;
+                    String n = kid.getName();
+                    if (n == null) continue;
+                    String fileNorm = normalizeToken(stripKnownExtension(n));
+                    if (wantedNorm.isEmpty() || fileNorm.isEmpty()) continue;
+                    if (fileNorm.equals(wantedNorm) || fileNorm.contains(wantedNorm) || wantedNorm.contains(fileNorm)) {
+                        Uri u = kid.getUri();
+                        return u == null ? null : u.toString();
+                    }
+                }
+                return null;
+            }
+
+            File base = new File(dir);
+            if (!base.exists() || !base.isDirectory()) return null;
+            File[] kids = base.listFiles();
+            if (kids == null) return null;
+            String wantedNorm = normalizeToken(stripKnownExtension(wanted));
+            for (File f : kids) {
+                if (f == null || !f.exists() || !f.isFile()) continue;
+                String n = f.getName();
+                if (n != null && n.equalsIgnoreCase(wanted)) {
+                    return f.getAbsolutePath();
+                }
+            }
+            for (File f : kids) {
+                if (f == null || !f.exists() || !f.isFile()) continue;
+                String n = f.getName();
+                if (n == null) continue;
+                String fileNorm = normalizeToken(stripKnownExtension(n));
+                if (wantedNorm.isEmpty() || fileNorm.isEmpty()) continue;
+                if (fileNorm.equals(wantedNorm) || fileNorm.contains(wantedNorm) || wantedNorm.contains(fileNorm)) {
+                    return f.getAbsolutePath();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private static boolean isMissingLocalFilePath(String path) {
+        if (path == null) return true;
+        String p = path.trim();
+        if (p.isEmpty()) return true;
+        if (p.startsWith("content://")) return false;
+        try {
+            File f = new File(p);
+            return !(f.exists() && f.isFile());
+        } catch (Throwable ignored) {
+        }
+        return true;
+    }
+
+    private static void rehydrateMediaPathsFromSourceNames(Context ctx, SharedPreferences prefs, SharedPreferences.Editor e, Map<String, String> loaded, String loadedFilename) {
+        if (ctx == null || prefs == null || e == null || loaded == null || loaded.isEmpty()) return;
+
+        try {
+            final String floppyDir = prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null);
+            final String cdromDir = prefs.getString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, null);
+            final String harddrivesDir = prefs.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null);
+            final String kickstartsDir = prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
+
+            final String[] srcKeys = new String[] {"df0_src", "df1_src", "df2_src", "df3_src", "cd0_src", "dh0_src", "dh1_src", "dh2_src", "dh3_src", "dh4_src"};
+            final String[] pathKeys = new String[] {
+                UaeOptionKeys.UAE_DRIVE_DF0_PATH,
+                UaeOptionKeys.UAE_DRIVE_DF1_PATH,
+                UaeOptionKeys.UAE_DRIVE_DF2_PATH,
+                UaeOptionKeys.UAE_DRIVE_DF3_PATH,
+                UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF0_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF4_PATH
+            };
+            final String[] enabledKeys = new String[] {
+                null,
+                null,
+                null,
+                null,
+                null,
+                UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED
+            };
+
+            for (int i = 0; i < srcKeys.length; i++) {
+                String sourceName = readDecodedString(loaded, srcKeys[i]);
+                if (sourceName == null || sourceName.isEmpty()) continue;
+
+                String existingPath = readDecodedString(loaded, pathKeys[i]);
+                if (existingPath != null && !existingPath.isEmpty() && !isMissingLocalFilePath(existingPath)) continue;
+
+                String candidateDir;
+                if (i <= 3) {
+                    candidateDir = floppyDir;
+                } else if (i == 4) {
+                    candidateDir = cdromDir;
+                } else {
+                    candidateDir = harddrivesDir;
+                }
+                if (candidateDir == null || candidateDir.trim().isEmpty()) continue;
+
+                String resolved = findFileInJoinedOrFsDir(ctx, candidateDir, sourceName);
+                if (resolved == null || resolved.trim().isEmpty()) continue;
+
+                applyDecoded(e, pathKeys[i], "s:" + escape(resolved));
+                if (enabledKeys[i] != null) {
+                    applyDecoded(e, enabledKeys[i], "b:true");
+                }
+            }
+
+            final String[] romSrcKeys = new String[] {"kick_src", "ext_src"};
+            final String[] romPathKeys = new String[] {
+                UaeOptionKeys.UAE_ROM_KICKSTART_FILE,
+                UaeOptionKeys.UAE_ROM_EXT_FILE
+            };
+            final String[] romLabelKeys = new String[] {
+                UaeOptionKeys.UAE_ROM_KICKSTART_LABEL,
+                UaeOptionKeys.UAE_ROM_EXT_LABEL
+            };
+
+            for (int i = 0; i < romSrcKeys.length; i++) {
+                String sourceName = readDecodedString(loaded, romSrcKeys[i]);
+                if (sourceName == null || sourceName.isEmpty()) continue;
+
+                String existingPath = readDecodedString(loaded, romPathKeys[i]);
+                if (existingPath != null && !existingPath.isEmpty() && !isMissingLocalFilePath(existingPath)) continue;
+
+                String resolved = null;
+                if (kickstartsDir != null && !kickstartsDir.trim().isEmpty()) {
+                    resolved = findFileInJoinedOrFsDir(ctx, kickstartsDir, sourceName);
+                }
+                if (resolved != null && !resolved.trim().isEmpty()) {
+                    applyDecoded(e, romPathKeys[i], "s:" + escape(resolved));
+                    applyDecoded(e, romLabelKeys[i], "s:" + escape(sourceName));
+                }
+            }
+
+            // Extra fallback for older/malformed floppy configs: derive DF0 media from config filename
+            // like floppies_bad_dudes[_model].cfg when df0 keys are absent.
+            String existingDf0 = readDecodedString(loaded, UaeOptionKeys.UAE_DRIVE_DF0_PATH);
+            String existingDf0Src = readDecodedString(loaded, "df0_src");
+            if ((existingDf0 == null || existingDf0.isEmpty()) && (existingDf0Src == null || existingDf0Src.isEmpty())) {
+                String guessed = candidateFromConfigFilename(loadedFilename);
+                if (guessed != null && !guessed.isEmpty() && floppyDir != null && !floppyDir.trim().isEmpty()) {
+                    String resolved = findFileInJoinedOrFsDir(ctx, floppyDir, guessed);
+                    if (resolved != null && !resolved.trim().isEmpty()) {
+                        applyDecoded(e, UaeOptionKeys.UAE_DRIVE_DF0_PATH, "s:" + escape(resolved));
+                        applyDecoded(e, "df0_src", "s:" + escape(guessed));
+                        applyDecoded(e, "boot_medium", "s:" + escape("floppy"));
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
     static String getConfigDirString(Context ctx) {
         try {
             SharedPreferences p = ctx.getSharedPreferences(UaeOptionKeys.PREFS_NAME, Context.MODE_PRIVATE);
@@ -731,6 +959,10 @@ final class ConfigStorage {
 
             // Best-effort: map common standard cfg keys into our Android launcher prefs.
             applyLegacyCfgMappings(e, legacy);
+
+            // Rebuild media path prefs from launcher source-name keys when configs were saved
+            // with df*/cd*/dh* labels but without corresponding uae_drive_* absolute paths.
+            rehydrateMediaPathsFromSourceNames(ctx, p, e, loaded, filename);
 
             // Use commit() so the caller can immediately reflect changes (e.g., BootstrapActivity onResume)
             // and to avoid transient UI states on fast activity transitions.

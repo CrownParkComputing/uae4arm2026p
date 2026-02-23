@@ -256,49 +256,6 @@ void set_scaling_option(const int monid, const uae_prefs* p, const int width, co
 #endif
 }
 
-#ifdef AMIBERRY_ANDROID
-static bool get_android_video_aspect_rect(SDL_Renderer* renderer, SDL_Rect* dst)
-{
-	if (!renderer || !dst)
-		return false;
-
-	int outW = 0;
-	int outH = 0;
-	SDL_GetRendererOutputSize(renderer, &outW, &outH);
-	if (outW <= 0 || outH <= 0)
-		return false;
-
-	const int mode = g_amiberry_android_video_aspect_mode.load(std::memory_order_relaxed);
-	const float targetAspect = (mode == 0) ? (4.0f / 3.0f) : (16.0f / 9.0f);
-	const float outputAspect = static_cast<float>(outW) / static_cast<float>(outH);
-
-	int dstW = outW;
-	int dstH = outH;
-	int dstX = 0;
-	int dstY = 0;
-
-	if (outputAspect > targetAspect)
-	{
-		dstW = static_cast<int>(std::lround(static_cast<double>(outH) * targetAspect));
-		dstX = (outW - dstW) / 2;
-	}
-	else
-	{
-		dstH = static_cast<int>(std::lround(static_cast<double>(outW) / targetAspect));
-		dstY = (outH - dstH) / 2;
-	}
-
-	if (dstW <= 0 || dstH <= 0)
-		return false;
-
-	dst->x = dstX;
-	dst->y = dstY;
-	dst->w = dstW;
-	dst->h = dstH;
-	return true;
-}
-#endif
-
 static float SDL2_getrefreshrate(const int monid)
 {
 	SDL_DisplayMode mode;
@@ -569,9 +526,6 @@ static bool SDL2_renderframe(const int monid, int mode, int immediate)
 		const SDL_Rect* p_crop = &crop_rect;
 		const SDL_Rect* p_quad = &render_quad;
 		SDL_Rect rtg_rect;
-		#ifdef AMIBERRY_ANDROID
-		SDL_Rect android_aspect_rect{0, 0, 0, 0};
-		#endif
 
 		#ifdef AMIBERRY_ANDROID
 		extern std::atomic<int> g_amiberry_android_stretch_to_fill;
@@ -594,10 +548,8 @@ static bool SDL2_renderframe(const int monid, int mode, int immediate)
 					s_logged_geometry = false;
 				}
 			}
-			if (get_android_video_aspect_rect(mon->amiga_renderer, &android_aspect_rect))
-				p_quad = &android_aspect_rect;
-			else
-				p_quad = nullptr;
+			// Stretch mode draws to the full output surface.
+			p_quad = nullptr;
 		}
 		else
 		{
@@ -641,10 +593,8 @@ static bool SDL2_renderframe(const int monid, int mode, int immediate)
 					if (lw_now != outW_now || lh_now != outH_now)
 						SDL_RenderSetLogicalSize(mon->amiga_renderer, outW_now, outH_now);
 				}
-				if (get_android_video_aspect_rect(mon->amiga_renderer, &android_aspect_rect))
-					p_quad = &android_aspect_rect;
-				else
-					p_quad = nullptr;
+				// Stretch mode draws to the full output surface.
+				p_quad = nullptr;
 			}
 			else
 			{
@@ -3743,14 +3693,6 @@ static int create_windows(struct AmigaMonitor* mon)
 		// We handle frame timing manually in SDL2_showframe with high precision.
 		// if (ap->gfx_vsync > 0)
 		//	renderer_flags |= SDL_RENDERER_PRESENTVSYNC;
-
-#ifdef AMIBERRY_ANDROID
-		// On Android, explicitly request OpenGL ES 2.0 for hardware-accelerated rendering.
-		// SDL2's default accelerated backend on Android is already OpenGL ES, but setting the
-		// hint explicitly ensures the correct driver is selected and avoids any fallback to
-		// software rendering on devices with non-standard driver enumeration.
-		SDL_SetHint(SDL_HINT_RENDER_DRIVER, "opengles2");
-#endif
 		mon->amiga_renderer = SDL_CreateRenderer(mon->amiga_window, -1, renderer_flags);
 		check_error_sdl(mon->amiga_renderer == nullptr, "Unable to create a renderer:");
 	}

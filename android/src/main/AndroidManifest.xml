@@ -10,6 +10,10 @@
     android:roundIcon="@mipmap/ic_launcher"
     android:resizeableActivity="false"
     android:maxAspectRatio="3.0">
+        <meta-data
+            android:name="SDL_ENV.SDL_RENDER_DRIVER"
+            android:value="opengles2" />
+
         <!--
           This activity is meant to be launched from a Flutter app via Intent.
           It relies on SDL2's Java glue: org.libsdl.app.SDLActivity.

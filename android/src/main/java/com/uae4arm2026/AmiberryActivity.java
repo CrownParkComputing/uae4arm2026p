@@ -1947,8 +1947,8 @@ public class AmiberryActivity extends SDLActivity {
         final int marginH = (int) (12 * d);
         final int marginV = (int) (8 * d);
         final int gap = (int) (8 * d);
-        final int btnPaddingH = (int) (16 * d);
-        final int btnPaddingV = (int) (10 * d);
+        final int btnPaddingH = (int) (10 * d);
+        final int btnPaddingV = (int) (6 * d);
 
         // Main overlay container
         final FrameLayout overlay = new FrameLayout(this);
@@ -1961,13 +1961,13 @@ public class AmiberryActivity extends SDLActivity {
         final Button btnHamburger = new Button(this);
         btnHamburger.setText("☰");
         styleOverlayButton(btnHamburger);
-        btnHamburger.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 24);
+        btnHamburger.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18);
         btnHamburger.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
 
         final Button btnKeyboard = new Button(this);
         btnKeyboard.setText("⌨");
         styleOverlayButton(btnKeyboard);
-        btnKeyboard.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20);
+        btnKeyboard.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
         btnKeyboard.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
 
         // Center menu panel (initially hidden)
@@ -2045,6 +2045,17 @@ public class AmiberryActivity extends SDLActivity {
         rtgBg.setCornerRadius(8 * d);
         rtgIndicator.setBackground(rtgBg);
         rtgIndicator.setVisibility(View.GONE);
+
+        final TextView rendererIndicator = new TextView(this);
+        rendererIndicator.setText("GL");
+        rendererIndicator.setTextColor(0xFFFFFFFF);
+        rendererIndicator.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
+        rendererIndicator.setPadding((int)(12*d), (int)(6*d), (int)(12*d), (int)(6*d));
+        android.graphics.drawable.GradientDrawable rendererBg = new android.graphics.drawable.GradientDrawable();
+        rendererBg.setColor(0xFF455A64);
+        rendererBg.setCornerRadius(8 * d);
+        rendererIndicator.setBackground(rendererBg);
+        rendererIndicator.setVisibility(View.VISIBLE);
 
         final TextView df0Indicator = new TextView(this);
         df0Indicator.setText("DF0");
@@ -2177,6 +2188,16 @@ public class AmiberryActivity extends SDLActivity {
         lpIndicators.rightMargin = marginH;
         overlay.addView(rtgRow, lpIndicators);
 
+        // Position renderer badge at top-left
+        final FrameLayout.LayoutParams lpRendererIndicator = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        lpRendererIndicator.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+        lpRendererIndicator.topMargin = marginV;
+        lpRendererIndicator.leftMargin = marginH;
+        overlay.addView(rendererIndicator, lpRendererIndicator);
+
         // Position menu panel in center
         final FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -2209,6 +2230,9 @@ public class AmiberryActivity extends SDLActivity {
                 lpIndicators.topMargin = marginV + insetTop;
                 lpIndicators.rightMargin = marginH + insetRight;
                 rtgRow.setLayoutParams(lpIndicators);
+                lpRendererIndicator.topMargin = marginV + insetTop;
+                lpRendererIndicator.leftMargin = marginH + insetLeft;
+                rendererIndicator.setLayoutParams(lpRendererIndicator);
                 return insets;
             });
             overlay.requestApplyInsets();
@@ -2369,6 +2393,7 @@ public class AmiberryActivity extends SDLActivity {
 
         // Store references
         mRtgIndicator = rtgIndicator;
+        mRendererIndicator = rendererIndicator;
         mDf0Indicator = df0Indicator;
         mDf1Indicator = df1Indicator;
         mDf2Indicator = df2Indicator;
@@ -2411,6 +2436,7 @@ public class AmiberryActivity extends SDLActivity {
 
     // References to status indicators for runtime updates
     private TextView mRtgIndicator;
+    private TextView mRendererIndicator;
     private TextView mLedIndicator;
     private TextView mDf0Indicator;
     private TextView mDf1Indicator;
@@ -2468,6 +2494,12 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
+    private void updateRendererIndicator() {
+        if (mRendererIndicator == null) return;
+        mRendererIndicator.setText("GL");
+        mRendererIndicator.setVisibility(View.VISIBLE);
+    }
+
     private boolean hasAnyHardDriveConfigured() {
         try {
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
@@ -2504,6 +2536,8 @@ public class AmiberryActivity extends SDLActivity {
     private void refreshOverlayDriveStatus() {
         boolean isWHDLoadMode = (mWHDLoadFile != null && !mWHDLoadFile.trim().isEmpty());
         boolean hasHardDriveMode = hasAnyHardDriveConfigured();
+
+        updateRendererIndicator();
 
         if (mWhdLhaQuickButton != null) {
             mWhdLhaQuickButton.setVisibility(isWHDLoadMode ? View.VISIBLE : View.GONE);
@@ -2971,22 +3005,6 @@ public class AmiberryActivity extends SDLActivity {
             Log.w(TAG, "Unable to read intent extras: " + t);
         }
 
-        // If no model was provided via the intent (e.g. launched from ConfigManagerActivity after
-        // loading a saved config), fall back to the persisted launcher preference so the emulator
-        // always boots with the correct machine baseline.
-        if (mQsModel == null || mQsModel.trim().isEmpty()) {
-            try {
-                SharedPreferences bp = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-                String m = bp.getString("qs_model", null);
-                if (m != null && !m.trim().isEmpty()) {
-                    mQsModel = m.trim();
-                    mQsConfigIndex = bp.getInt("qs_config", 0);
-                    logI("qs_model not in intent; falling back to prefs: " + mQsModel + " cfg=" + mQsConfigIndex);
-                }
-            } catch (Throwable ignored) {
-            }
-        }
-
         if (forcedKick != null && !forcedKick.isEmpty()) {
             mKickstartRomFile = forcedKick;
             logI("Using forced Kickstart ROM from intent: " + mKickstartRomFile);
@@ -3207,6 +3225,16 @@ public class AmiberryActivity extends SDLActivity {
             if (intent != null && intent.getBooleanExtra(EXTRA_REQUEST_RESTART, false)) {
                 Log.i(TAG, "Received EXTRA_REQUEST_RESTART");
                 mRestartRequested = false;
+
+                // Refresh quickstart model/config context from the incoming intent
+                // so CD32 <-> DF transitions don't keep stale model behavior.
+                if (intent.hasExtra(EXTRA_QS_MODEL)) {
+                    String qsModel = intent.getStringExtra(EXTRA_QS_MODEL);
+                    mQsModel = (qsModel == null || qsModel.trim().isEmpty()) ? null : qsModel.trim();
+                }
+                mQsConfigIndex = intent.getIntExtra(EXTRA_QS_CONFIG_INDEX, mQsConfigIndex);
+                mQsNtsc = intent.getBooleanExtra(EXTRA_QS_NTSC, mQsNtsc);
+                mQsMode = intent.getBooleanExtra(EXTRA_QS_MODE, mQsMode);
                 
                 // When restarting, read the DF0-DF3 extras from the intent
                 // These represent the new disk selection from the swapper
@@ -3236,6 +3264,10 @@ public class AmiberryActivity extends SDLActivity {
                 }
                 persistResolvedFloppyPathsToPrefs();
                 refreshOverlayDriveStatus();
+
+                // Request a full process/activity restart so all runtime args (CD/HDF/CPU/model)
+                // are rebuilt from the newly loaded config, not just floppy hot-swap state.
+                mRestartRequested = true;
                 return;
             }
         } catch (Throwable ignored) {
@@ -3380,10 +3412,24 @@ public class AmiberryActivity extends SDLActivity {
 
         List<String> args = new ArrayList<>();
 
+        String effectiveQsModel = mQsModel;
+        if (effectiveQsModel == null || effectiveQsModel.trim().isEmpty()) {
+            effectiveQsModel = p.getString("qs_model", null);
+        }
+        if (effectiveQsModel == null || effectiveQsModel.trim().isEmpty()) {
+            effectiveQsModel = p.getString(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE, null);
+        }
+        if (effectiveQsModel != null) {
+            effectiveQsModel = effectiveQsModel.trim();
+            if (effectiveQsModel.isEmpty()) {
+                effectiveQsModel = null;
+            }
+        }
+
         // Apply Quickstart model first (sets the baseline prefs internally), then override via -s.
-        if (mQsModel != null && !mQsModel.trim().isEmpty()) {
+        if (effectiveQsModel != null) {
             args.add("--model");
-            args.add(mQsModel.trim());
+            args.add(effectiveQsModel);
         }
 
         // Optional: record the GUI's "Start in Quickstart mode" flag in amiberry.conf.
@@ -3428,8 +3474,8 @@ public class AmiberryActivity extends SDLActivity {
         // Limit the visible floppy devices to what we actually support in the launcher.
         // This keeps the RTG statusline from showing DF2/DF3.
         boolean isCdOnlyQuickstart = false;
-        if (mQsModel != null) {
-            String m = mQsModel.trim().toUpperCase();
+        if (effectiveQsModel != null) {
+            String m = effectiveQsModel.toUpperCase(java.util.Locale.ROOT);
             isCdOnlyQuickstart = "CD32".equals(m) || "CDTV".equals(m) || "ALG".equals(m) || "ARCADIA".equals(m);
         }
 
@@ -3798,7 +3844,16 @@ public class AmiberryActivity extends SDLActivity {
             }
         }
 
-        if (p.contains(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED)) {
+        boolean isCd32Quickstart = false;
+        if (effectiveQsModel != null) {
+            String m = effectiveQsModel.toUpperCase(java.util.Locale.ROOT);
+            isCd32Quickstart = "CD32".equals(m);
+        }
+
+        if (isCd32Quickstart) {
+            args.add("-s");
+            args.add("cd32cd=1");
+        } else if (p.contains(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED)) {
             boolean v = p.getBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, false);
             args.add("-s");
             args.add("cd32cd=" + (v ? "1" : "0"));
@@ -3817,104 +3872,107 @@ public class AmiberryActivity extends SDLActivity {
             args.add("cd_speed=" + (v ? "0" : "100"));
         }
 
-        // Directory mounts (filesystem2)
-        addFilesystem2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_DIR0_PATH,
-            UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR0_READONLY,
-            UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI,
-            "DH0", "Work", 0);
-
-        addFilesystem2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_DIR1_PATH,
-            UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR1_READONLY,
-            UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI,
-            "DH1", "Work2", -128);
-
-        addFilesystem2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_DIR2_PATH,
-            UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR2_READONLY,
-            UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI,
-            "DH2", "Work3", -129);
-
-        addFilesystem2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_DIR3_PATH,
-            UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR3_READONLY,
-            UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI,
-            "DH3", "Work4", -130);
-
-        addFilesystem2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_DIR4_PATH,
-            UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME,
-            UaeOptionKeys.UAE_DRIVE_DIR4_READONLY,
-            UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI,
-            "DH4", "Work5", -131);
-
-        // HDF mount (hardfile2)
+        // Directory/HDF mounts are disabled for CD-only quickstarts to prevent stale HD prefs
+        // from interfering with CD32/CDTV game boot/runtime behavior.
         boolean needsUaeBootRom = false;
+        if (!isCdOnlyQuickstart) {
+            // Directory mounts (filesystem2)
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR0_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR0_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI,
+                "DH0", "Work", 0);
 
-        needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_HDF0_PATH,
-            UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_HDF0_READONLY,
-            "DH0",
-            0,
-            mKickstartRomFile,
-            romPath);
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR1_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR1_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI,
+                "DH1", "Work2", -128);
 
-        needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
-            UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_HDF1_READONLY,
-            "DH1",
-            1,
-            mKickstartRomFile,
-            romPath);
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR2_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR2_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI,
+                "DH2", "Work3", -129);
 
-        needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
-            UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_HDF2_READONLY,
-            "DH2",
-            2,
-            mKickstartRomFile,
-            romPath);
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR3_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR3_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI,
+                "DH3", "Work4", -130);
 
-        needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
-            UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_HDF3_READONLY,
-            "DH3",
-            3,
-            mKickstartRomFile,
-            romPath);
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR4_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR4_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI,
+                "DH4", "Work5", -131);
 
-        needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-            UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED,
-            UaeOptionKeys.UAE_DRIVE_HDF4_PATH,
-            UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME,
-            UaeOptionKeys.UAE_DRIVE_HDF4_READONLY,
-            "DH4",
-            4,
-            mKickstartRomFile,
-            romPath);
+            // HDF mount (hardfile2)
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF0_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF0_READONLY,
+                "DH0",
+                0,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF1_READONLY,
+                "DH1",
+                1,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF2_READONLY,
+                "DH2",
+                2,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF3_READONLY,
+                "DH3",
+                3,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF4_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF4_READONLY,
+                "DH4",
+                4,
+                mKickstartRomFile,
+                romPath);
+        }
 
         // If any hardfile2 entry is using the "uae" controller, the uaehf.device driver must be
         // available early. Ensure the UAE Boot ROM is enabled unless the user explicitly chose a
@@ -4308,6 +4366,12 @@ public class AmiberryActivity extends SDLActivity {
                     if (v == null) continue;
                     String vv = v.trim();
                     if (vv.isEmpty()) continue;
+                    if (isCdOnlyQuickstart) {
+                        String lk = key.toLowerCase(java.util.Locale.ROOT);
+                        if (lk.startsWith("filesystem") || lk.startsWith("hardfile") || lk.startsWith("uaehf") || lk.startsWith("floppy")) {
+                            continue;
+                        }
+                    }
                     args.add("-s");
                     args.add(key + "=" + vv);
                 }
@@ -4315,22 +4379,49 @@ public class AmiberryActivity extends SDLActivity {
         } catch (Throwable ignored) {
         }
 
-        if (!isCdOnlyQuickstart && mDf0DiskImagePath != null && !mDf0DiskImagePath.isEmpty()) {
+        // Re-assert CD-only safety after imported overrides.
+        if (isCdOnlyQuickstart) {
+            args.add("-s");
+            args.add("nr_floppies=0");
+            args.add("-s");
+            args.add("floppy0type=-1");
+            args.add("-s");
+            args.add("floppy1type=-1");
+            args.add("-s");
+            args.add("floppy2type=-1");
+            args.add("-s");
+            args.add("floppy3type=-1");
+            if (isCd32Quickstart) {
+                args.add("-s");
+                args.add("cd32cd=1");
+            }
+        }
+
+        String bootMedium = p.getString("boot_medium", "floppy");
+        String bootMediumNorm = (bootMedium == null) ? "" : bootMedium.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean allowFloppyCli = !isCdOnlyQuickstart
+            && !("hd".equals(bootMediumNorm)
+            || "hdf".equals(bootMediumNorm)
+            || "cd".equals(bootMediumNorm)
+            || "cdrom".equals(bootMediumNorm)
+            || "cd32".equals(bootMediumNorm));
+
+        if (allowFloppyCli && mDf0DiskImagePath != null && !mDf0DiskImagePath.isEmpty()) {
             args.add("-0");
             args.add(mDf0DiskImagePath);
         }
 
-        if (!isCdOnlyQuickstart && mDf1DiskImagePath != null && !mDf1DiskImagePath.isEmpty()) {
+        if (allowFloppyCli && mDf1DiskImagePath != null && !mDf1DiskImagePath.isEmpty()) {
             args.add("-1");
             args.add(mDf1DiskImagePath);
         }
 
-        if (!isCdOnlyQuickstart && mDf2DiskImagePath != null && !mDf2DiskImagePath.isEmpty()) {
+        if (allowFloppyCli && mDf2DiskImagePath != null && !mDf2DiskImagePath.isEmpty()) {
             args.add("-2");
             args.add(mDf2DiskImagePath);
         }
 
-        if (!isCdOnlyQuickstart && mDf3DiskImagePath != null && !mDf3DiskImagePath.isEmpty()) {
+        if (allowFloppyCli && mDf3DiskImagePath != null && !mDf3DiskImagePath.isEmpty()) {
             args.add("-3");
             args.add(mDf3DiskImagePath);
         }
