@@ -1918,6 +1918,8 @@ public class BootstrapActivity extends Activity {
 
     private static final String PREFS_NAME = "bootstrap";
     private static final String PREF_WALKTHROUGH_COMPLETED = "walkthrough_completed";
+    private static final String PREF_LAST_APP_VERSION_CODE = "last_app_version_code";
+    private static final String PREF_LAST_APP_UPDATE_TIME = "last_app_update_time";
     private static final String PREF_KICK_SRC = "kick_src";
     private static final String PREF_EXT_SRC = "ext_src";
     private static final String PREF_CD0_SRC = "cd0_src";
@@ -4908,7 +4910,7 @@ public class BootstrapActivity extends Activity {
 
     private void maybeMigrateKickstartsPathPref() {
         try {
-            SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
             String cur = p.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
             if (cur == null || cur.trim().isEmpty()) return;
 
@@ -4979,6 +4981,69 @@ public class BootstrapActivity extends Activity {
     // ── First-run uae4arm folder setup ────────────────────────────────────────
 
     private static final String PREF_FIRST_RUN_DONE = "first_run_folder_done";
+
+    private long getCurrentAppVersionCode() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return pi.getLongVersionCode();
+            }
+            return pi.versionCode;
+        } catch (Throwable ignored) {
+            return -1L;
+        }
+    }
+
+    private long getCurrentAppLastUpdateTime() {
+        try {
+            android.content.pm.PackageInfo pi = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return pi.lastUpdateTime;
+        } catch (Throwable ignored) {
+            return -1L;
+        }
+    }
+
+    private void enforceSetupOnAppUpdateIfNeeded() {
+        if (mLaunchedFromEmulatorMenu) return;
+
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            long currentVersion = getCurrentAppVersionCode();
+            long currentUpdateTime = getCurrentAppLastUpdateTime();
+            if (currentVersion <= 0L && currentUpdateTime <= 0L) return;
+
+            long lastSeenVersion = prefs.getLong(PREF_LAST_APP_VERSION_CODE, -1L);
+            long lastSeenUpdateTime = prefs.getLong(PREF_LAST_APP_UPDATE_TIME, -1L);
+
+            if (lastSeenVersion < 0L && lastSeenUpdateTime < 0L) {
+                prefs.edit()
+                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
+                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
+                    .apply();
+                return;
+            }
+
+            boolean updatedByVersion = currentVersion > 0L && lastSeenVersion > 0L && currentVersion > lastSeenVersion;
+            boolean updatedByInstallTime = currentUpdateTime > 0L && currentUpdateTime != lastSeenUpdateTime;
+
+            if (updatedByVersion || updatedByInstallTime) {
+                prefs.edit()
+                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
+                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
+                    .putBoolean(PREF_WALKTHROUGH_COMPLETED, false)
+                    .putBoolean(PREF_FIRST_RUN_DONE, false)
+                    .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, false)
+                    .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, false)
+                    .apply();
+            } else if (currentVersion != lastSeenVersion || currentUpdateTime != lastSeenUpdateTime) {
+                prefs.edit()
+                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
+                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
+                    .apply();
+            }
+        } catch (Throwable ignored) {
+        }
+    }
 
     private void maybeSetupFirstRunFolders() {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -5287,6 +5352,9 @@ public class BootstrapActivity extends Activity {
         }
 
         setContentView(R.layout.activity_bootstrap);
+
+        // After each install/update, force setup once so SAF/storage can be reconfirmed.
+        enforceSetupOnAppUpdateIfNeeded();
 
         // Check if first-time walkthrough should be shown
         if (!mLaunchedFromEmulatorMenu && savedInstanceState == null) {

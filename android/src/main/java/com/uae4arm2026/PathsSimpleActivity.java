@@ -493,6 +493,88 @@ public class PathsSimpleActivity extends Activity {
         return null;
     }
 
+    private void repairMalformedPathsForSelectedParent(String joinedParent) {
+        if (joinedParent == null || joinedParent.trim().isEmpty()) return;
+
+        fixPathForParent(UaeOptionKeys.UAE_PATH_CONF_DIR, joinedParent, "conf");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, joinedParent, "kickstarts");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_ROMS_DIR, joinedParent, "roms");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, joinedParent, "disks");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_CDROMS_DIR, joinedParent, "cdroms");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, joinedParent, "harddrives");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_LHA_DIR, joinedParent, "lha");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, joinedParent, "whdboot");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, joinedParent, "savestates");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_SCREENS_DIR, joinedParent, "screenshots");
+    }
+
+    private void fixPathForParent(String key, String joinedParent, String rel) {
+        if (key == null || joinedParent == null) return;
+        String current = pending.get(key);
+        if (current == null
+            || current.trim().isEmpty()
+            || looksMalformedSafChildTree(current)
+            || looksLikeWrongMappedSubfolder(current, joinedParent, rel)) {
+            String normalized = joinedParent;
+            if (!normalized.endsWith("/")) normalized = normalized + "/";
+            normalized = normalized + rel + "/";
+            pending.put(key, normalized);
+        }
+    }
+
+    private static boolean looksMalformedSafChildTree(String value) {
+        if (value == null) return false;
+        String v = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (v.isEmpty()) return false;
+        return v.contains("%2ffloppies") || v.contains("%2fdisks") || v.contains("/floppies") || v.contains("/disks");
+    }
+
+    private static String normalizeRel(String rel) {
+        if (rel == null) return "";
+        String r = rel.trim();
+        while (r.startsWith("/")) r = r.substring(1);
+        while (r.endsWith("/")) r = r.substring(0, r.length() - 1);
+        return r.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private static boolean isKnownDefaultSubfolder(String rel) {
+        if (rel == null || rel.isEmpty()) return false;
+        return "conf".equals(rel)
+            || "kickstarts".equals(rel)
+            || "roms".equals(rel)
+            || "disks".equals(rel)
+            || "floppies".equals(rel)
+            || "cdroms".equals(rel)
+            || "harddrives".equals(rel)
+            || "lha".equals(rel)
+            || "whdboot".equals(rel)
+            || "savestates".equals(rel)
+            || "screenshots".equals(rel)
+            || "screens".equals(rel);
+    }
+
+    private static boolean looksLikeWrongMappedSubfolder(String currentPath, String joinedParent, String expectedRel) {
+        if (currentPath == null || joinedParent == null || expectedRel == null) return false;
+        if (!ConfigStorage.isSafJoinedPath(currentPath) || !ConfigStorage.isSafJoinedPath(joinedParent)) return false;
+
+        try {
+            ConfigStorage.SafPath current = ConfigStorage.splitSafJoinedPath(currentPath);
+            ConfigStorage.SafPath parent = ConfigStorage.splitSafJoinedPath(joinedParent);
+            if (current == null || parent == null) return false;
+            if (current.treeUri == null || parent.treeUri == null) return false;
+            if (!current.treeUri.trim().equals(parent.treeUri.trim())) return false;
+
+            String currentRel = normalizeRel(current.relPath);
+            String expected = normalizeRel(expectedRel);
+            if (currentRel.isEmpty() || expected.isEmpty()) return false;
+            if (currentRel.equals(expected)) return false;
+
+            return isKnownDefaultSubfolder(currentRel);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -521,8 +603,8 @@ public class PathsSimpleActivity extends Activity {
             String joinedParent = toSafJoinedRoot(uri);
             if (joinedParent != null) {
                 pending.put(UaeOptionKeys.UAE_PATH_PARENT_DIR, joinedParent);
+                repairMalformedPathsForSelectedParent(joinedParent);
             }
-            autoFillFromParent();
             saveAll();
             refreshAll();
             return;
@@ -556,7 +638,6 @@ public class PathsSimpleActivity extends Activity {
 
         // For compatibility with existing launcher prompts, keep a "last selected tree".
         pending.put(slot.prefKey, joined);
-        pending.put(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, uri.toString());
         saveAll();
 
         refreshAll();

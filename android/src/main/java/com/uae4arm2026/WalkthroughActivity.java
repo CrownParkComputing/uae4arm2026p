@@ -715,18 +715,55 @@ public class WalkthroughActivity extends Activity {
 		String base = parentTree.toString() + "::/";
 
 		e.putString(UaeOptionKeys.UAE_PATH_PARENT_DIR, base);
-		e.putString(UaeOptionKeys.UAE_PATH_CONF_DIR, base + "conf/");
-		e.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, base + "kickstarts/");
-		e.putString(UaeOptionKeys.UAE_PATH_ROMS_DIR, base + "roms/");
-		e.putString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, base + "floppies/");
-		e.putString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, base + "harddrives/");
-		e.putString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, base + "cdroms/");
-		e.putString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, base + "savestates/");
-		e.putString(UaeOptionKeys.UAE_PATH_SCREENS_DIR, base + "screenshots/");
-		e.putString(UaeOptionKeys.UAE_PATH_LHA_DIR, base + "lha/");
-		e.putString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, base + "whdboot/");
+
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_CONF_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_CONF_DIR, base + "conf/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, base + "kickstarts/");
+		} else {
+			String currentKickstarts = prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
+			if (looksLikeWrongKickstartsUnderFloppies(currentKickstarts)) {
+				e.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, base + "kickstarts/");
+			}
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_ROMS_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_ROMS_DIR, base + "roms/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, base + "floppies/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, base + "harddrives/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, base + "cdroms/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, base + "savestates/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_SCREENS_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_SCREENS_DIR, base + "screenshots/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_LHA_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_LHA_DIR, base + "lha/");
+		}
+		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, null))) {
+			e.putString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, base + "whdboot/");
+		}
 
 		e.apply();
+	}
+
+	private static boolean looksLikeWrongKickstartsUnderFloppies(String value) {
+		if (value == null) return false;
+		String v = value.trim().toLowerCase(java.util.Locale.ROOT);
+		if (v.isEmpty()) return false;
+		return v.contains("/floppies/kickstarts") || v.contains("/disks/kickstarts");
+	}
+
+	private static boolean isBlank(String value) {
+		return value == null || value.trim().isEmpty();
 	}
 
 	private void showCompletePage() {
