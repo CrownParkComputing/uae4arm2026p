@@ -498,6 +498,11 @@ public:
 		}
 
 		m_bIsWaitingForOpen = false;
+		if ( !g_midHIDDeviceManagerOpen )
+		{
+			LOGV( "Device open without Java openDevice callback" );
+			return false;
+		}
 		m_bOpenResult = env->CallBooleanMethod( g_HIDDeviceManagerCallbackHandler, g_midHIDDeviceManagerOpen, m_nId );
 		ExceptionCheck( env, "BOpen" );
 
@@ -871,31 +876,37 @@ JNIEXPORT void JNICALL HID_DEVICE_MANAGER_JAVA_INTERFACE(HIDDeviceRegisterCallba
 	{
 		g_HIDDeviceManagerCallbackClass = reinterpret_cast< jclass >( env->NewGlobalRef( objClass ) );
 		g_midHIDDeviceManagerInitialize = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "initialize", "(ZZ)Z" );
+		ExceptionCheck( env, "HIDDeviceManager", "initialize" );
 		if ( !g_midHIDDeviceManagerInitialize )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing initialize" );
 		}
 		g_midHIDDeviceManagerOpen = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "openDevice", "(I)Z" );
+		ExceptionCheck( env, "HIDDeviceManager", "openDevice" );
 		if ( !g_midHIDDeviceManagerOpen )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing openDevice" );
 		}
 		g_midHIDDeviceManagerSendOutputReport = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "sendOutputReport", "(I[B)I" );
+		ExceptionCheck( env, "HIDDeviceManager", "sendOutputReport" );
 		if ( !g_midHIDDeviceManagerSendOutputReport )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing sendOutputReport" );
 		}
 		g_midHIDDeviceManagerSendFeatureReport = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "sendFeatureReport", "(I[B)I" );
+		ExceptionCheck( env, "HIDDeviceManager", "sendFeatureReport" );
 		if ( !g_midHIDDeviceManagerSendFeatureReport )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing sendFeatureReport" );
 		}
 		g_midHIDDeviceManagerGetFeatureReport = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "getFeatureReport", "(I[B)Z" );
+		ExceptionCheck( env, "HIDDeviceManager", "getFeatureReport" );
 		if ( !g_midHIDDeviceManagerGetFeatureReport )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing getFeatureReport" );
 		}
 		g_midHIDDeviceManagerClose = env->GetMethodID( g_HIDDeviceManagerCallbackClass, "closeDevice", "(I)V" );
+		ExceptionCheck( env, "HIDDeviceManager", "closeDevice" );
 		if ( !g_midHIDDeviceManagerClose )
 		{
 			__android_log_print(ANDROID_LOG_ERROR, TAG, "HIDDeviceRegisterCallback: callback class missing closeDevice" );
@@ -1060,8 +1071,15 @@ int hid_init(void)
 
 			if ( !g_HIDDeviceManagerCallbackHandler )
 			{
-				LOGV( "hid_init() without callback handler" );
-				return -1;
+				LOGV( "hid_init() without callback handler; HID manager integration disabled" );
+				g_initialized = true;
+				return 0;
+			}
+			if ( !g_midHIDDeviceManagerInitialize )
+			{
+				LOGV( "hid_init() without Java initialize callback" );
+				g_initialized = true;
+				return 0;
 			}
 
 			// Bluetooth is currently only used for Steam Controllers, so check that hint
