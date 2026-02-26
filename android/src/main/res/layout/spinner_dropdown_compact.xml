@@ -3,11 +3,10 @@
     android:id="@android:id/text1"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp"
+    android:paddingStart="8dp"
+    android:paddingEnd="8dp"
+    android:textSize="13sp"
     android:ellipsize="end"
-    android:maxLines="1"
-    android:paddingStart="6dp"
-    android:paddingEnd="6dp"
-    android:paddingTop="3dp"
-    android:paddingBottom="3dp"
-    android:textColor="?android:attr/textColorPrimary"
-    android:textSize="12sp" />
+    android:singleLine="true" />

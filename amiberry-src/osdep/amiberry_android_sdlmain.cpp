@@ -7,8 +7,14 @@
 #include <jni.h>
 
 #include <atomic>
+#include <string>
 
 #include <SDL.h>
+#include <SDL_hints.h>
+
+#ifdef USE_OPENGL
+#include <SDL_opengl.h>
+#endif
 
 #include "sysdeps.h"
 #include "gui.h"
@@ -272,6 +278,81 @@ extern "C" JNIEXPORT jint JNICALL
 Java_com_uae4arm2026_AmiberryActivity_nativeGetVideoAspectMode(JNIEnv*, jclass)
 {
 	return g_amiberry_android_video_aspect_mode.load(std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererDebugInfo(JNIEnv* env, jclass)
+{
+	if (!env)
+		return nullptr;
+
+	auto gfx_api_name = [](int v) -> const char* {
+		switch (v) {
+			case 0: return "directdraw";
+			case 1: return "direct3d";
+			case 2: return "direct3d11";
+			case 3: return "direct3d11-hdr";
+			case 4: return "sdl2";
+			default: return "unknown";
+		}
+	};
+
+	const char* sdl_video = SDL_GetCurrentVideoDriver();
+	if (!sdl_video)
+		sdl_video = "unknown";
+
+	const char* sdl_render_hint = SDL_GetHint(SDL_HINT_RENDER_DRIVER);
+	if (!sdl_render_hint)
+		sdl_render_hint = "(default)";
+
+	std::string gl_renderer = "n/a";
+	std::string gl_version = "n/a";
+#ifdef USE_OPENGL
+	if (SDL_GL_GetCurrentContext()) {
+		const char* r = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+		const char* v = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+		if (r && *r)
+			gl_renderer = r;
+		if (v && *v)
+			gl_version = v;
+	}
+#endif
+
+	std::string out;
+	out.reserve(512);
+	out += "build.use_vulkan=";
+#ifdef USE_VULKAN
+	out += "1";
+#else
+	out += "0";
+#endif
+	out += "\n";
+	out += "build.use_opengl=";
+#ifdef USE_OPENGL
+	out += "1";
+#else
+	out += "0";
+#endif
+	out += "\n";
+	out += "gfx_api=";
+	out += gfx_api_name(currprefs.gfx_api);
+	out += "\n";
+	out += "gfx_api_options=";
+	out += (currprefs.gfx_api_options == 1 ? "software" : "hardware");
+	out += "\n";
+	out += "sdl.video_driver=";
+	out += sdl_video;
+	out += "\n";
+	out += "sdl.render_driver_hint=";
+	out += sdl_render_hint;
+	out += "\n";
+	out += "gl.renderer=";
+	out += gl_renderer;
+	out += "\n";
+	out += "gl.version=";
+	out += gl_version;
+
+	return env->NewStringUTF(out.c_str());
 }
 
 extern "C" JNIEXPORT jint JNICALL

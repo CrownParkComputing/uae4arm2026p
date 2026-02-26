@@ -173,6 +173,10 @@ public class AmiberryActivity extends SDLActivity {
     public static final String EXTRA_DF0_DISK_FILE = "com.uae4arm2026.extra.DF0_DISK_FILE";
     public static final String EXTRA_DF0_SOURCE_NAME = "com.uae4arm2026.extra.DF0_SOURCE_NAME";
 
+    // Optional intent extra to force a specific CD image file (ISO/CUE/CHD/etc).
+    // If provided, this is preferred over prefs for cdimage0 mounting.
+    public static final String EXTRA_CD_IMAGE0_FILE = "com.uae4arm2026.extra.CD_IMAGE0_FILE";
+
     // Optional intent extras to force disk images for DF1–DF3.
     public static final String EXTRA_DF1_DISK_FILE = "com.uae4arm2026.extra.DF1_DISK_FILE";
     public static final String EXTRA_DF2_DISK_FILE = "com.uae4arm2026.extra.DF2_DISK_FILE";
@@ -243,6 +247,9 @@ public class AmiberryActivity extends SDLActivity {
 
     // Optional DF0 disk image.
     private String mDf0DiskImagePath = null;
+
+    // Optional forced CD image.
+    private String mCdImagePath = null;
     private String mDf0SourceName = null;
 
     // Optional DF1–DF3 disk images.
@@ -1305,6 +1312,20 @@ public class AmiberryActivity extends SDLActivity {
         );
     }
 
+    private static void addSettingArg(List<String> args, String key, String value) {
+        if (args == null || key == null || value == null) return;
+        args.add("-s");
+        args.add(key + "=" + value);
+    }
+
+    private static void addCd32SafetyOverrides(List<String> args) {
+        addSettingArg(args, "cd32cd", "1");
+        addSettingArg(args, "cd32c2p", "true");
+        addSettingArg(args, "cd32nvram", "true");
+        addSettingArg(args, "cpu_24bit_addressing", "true");
+        addSettingArg(args, "cpu_compatible", "true");
+    }
+
     private static String joyEventForAction(int port, String action) {
         if (action == null || action.trim().isEmpty()) return null;
         String keyboardEvent = keyboardEventForAction(action);
@@ -2047,7 +2068,7 @@ public class AmiberryActivity extends SDLActivity {
         rtgIndicator.setVisibility(View.GONE);
 
         final TextView rendererIndicator = new TextView(this);
-        rendererIndicator.setText("GL");
+        rendererIndicator.setText("DDG");
         rendererIndicator.setTextColor(0xFFFFFFFF);
         rendererIndicator.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
         rendererIndicator.setPadding((int)(12*d), (int)(6*d), (int)(12*d), (int)(6*d));
@@ -2056,6 +2077,7 @@ public class AmiberryActivity extends SDLActivity {
         rendererBg.setCornerRadius(8 * d);
         rendererIndicator.setBackground(rendererBg);
         rendererIndicator.setVisibility(View.VISIBLE);
+        rendererIndicator.setOnClickListener(v -> showRendererInfoDialog());
 
         final TextView df0Indicator = new TextView(this);
         df0Indicator.setText("DF0");
@@ -2338,7 +2360,17 @@ public class AmiberryActivity extends SDLActivity {
             btnHamburger.setText("☰");
             mPausedByOverlay = false;
             try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
-            coldRestartToSetupGui();
+            try {
+                new AlertDialog.Builder(this)
+                    .setTitle("Return to launcher?")
+                    .setMessage("This stops the current emulation session and returns to setup.")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Return", (dialog, which) -> coldRestartToSetupGui())
+                    .show();
+            } catch (Throwable t) {
+                Log.w(TAG, "Restart confirmation failed, continuing with restart: " + t);
+                coldRestartToSetupGui();
+            }
         });
 
         btnAspectQuick.setOnClickListener(v -> {
@@ -2496,8 +2528,50 @@ public class AmiberryActivity extends SDLActivity {
 
     private void updateRendererIndicator() {
         if (mRendererIndicator == null) return;
-        mRendererIndicator.setText("GL");
+        String info = null;
+        try {
+            info = nativeGetRendererDebugInfo();
+        } catch (Throwable ignored) {
+        }
+        String badge = "DBG";
+        if (info != null) {
+            String lc = info.toLowerCase(java.util.Locale.ROOT);
+            if (lc.contains("build.use_vulkan=1")) {
+                badge = "VK";
+            } else if (lc.contains("gl.renderer=") && !lc.contains("gl.renderer=n/a")) {
+                badge = "GL";
+            } else if (lc.contains("gfx_api=sdl2")) {
+                badge = "SDL";
+            }
+        }
+        mRendererIndicator.setText(badge);
         mRendererIndicator.setVisibility(View.VISIBLE);
+    }
+
+    private void showRendererInfoDialog() {
+        String aspect = "16:9";
+        try {
+            aspect = normalizeVideoAspectMode(nativeGetVideoAspectMode()) == 0 ? "4:3" : "16:9";
+        } catch (Throwable ignored) {
+        }
+        String dbg = "";
+        try {
+            dbg = nativeGetRendererDebugInfo();
+        } catch (Throwable ignored) {
+        }
+        StringBuilder info = new StringBuilder();
+        info.append("Graphic renderer / driver (runtime)");
+        info.append("\nVideo aspect: ").append(aspect);
+        info.append("\nRTG: ").append((mRtgIndicator != null && mRtgIndicator.getVisibility() == View.VISIBLE) ? "ON" : "OFF");
+        if (dbg != null && !dbg.trim().isEmpty()) {
+            info.append("\n\n").append(dbg.trim());
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle("Renderer Info")
+            .setMessage(info.toString())
+            .setPositiveButton("OK", null)
+            .show();
     }
 
     private boolean hasAnyHardDriveConfigured() {
@@ -2975,10 +3049,12 @@ public class AmiberryActivity extends SDLActivity {
         String forcedDf1 = null;
         String forcedDf2 = null;
         String forcedDf3 = null;
+        String forcedCd0 = null;
         boolean hasForcedDf0 = false;
         boolean hasForcedDf1 = false;
         boolean hasForcedDf2 = false;
         boolean hasForcedDf3 = false;
+        boolean hasForcedCd0 = false;
         try {
             Intent intent = getIntent();
             if (intent != null) {
@@ -2988,10 +3064,13 @@ public class AmiberryActivity extends SDLActivity {
             hasForcedDf1 = intent.hasExtra(EXTRA_DF1_DISK_FILE);
             hasForcedDf2 = intent.hasExtra(EXTRA_DF2_DISK_FILE);
             hasForcedDf3 = intent.hasExtra(EXTRA_DF3_DISK_FILE);
+            hasForcedCd0 = intent.hasExtra(EXTRA_CD_IMAGE0_FILE);
             forcedDf0 = hasForcedDf0 ? intent.getStringExtra(EXTRA_DF0_DISK_FILE) : null;
             forcedDf1 = hasForcedDf1 ? intent.getStringExtra(EXTRA_DF1_DISK_FILE) : null;
             forcedDf2 = hasForcedDf2 ? intent.getStringExtra(EXTRA_DF2_DISK_FILE) : null;
             forcedDf3 = hasForcedDf3 ? intent.getStringExtra(EXTRA_DF3_DISK_FILE) : null;
+            forcedCd0 = hasForcedCd0 ? intent.getStringExtra(EXTRA_CD_IMAGE0_FILE) : null;
+            logI("Intent forced CD extra present=" + hasForcedCd0);
                 mShowGui = intent.getBooleanExtra(EXTRA_SHOW_GUI, false);
                 mCpuType = intent.getStringExtra(EXTRA_CPU_TYPE);
                 mMachinePreset = intent.getStringExtra(EXTRA_MACHINE_PRESET);
@@ -3111,6 +3190,37 @@ public class AmiberryActivity extends SDLActivity {
             }
         }
 
+        if (hasForcedCd0) {
+            String s = (forcedCd0 == null) ? "" : forcedCd0.trim();
+            if (s.isEmpty()) {
+                mCdImagePath = null;
+                logI("Using forced CD image from intent: (eject)");
+            } else if (s.startsWith("content://")) {
+                mCdImagePath = s;
+                logI("Using forced CD image from intent (SAF): " + mCdImagePath);
+            } else {
+                File f = new File(s);
+                if (f.exists() && f.canRead()) {
+                    mCdImagePath = f.getAbsolutePath();
+                    logI("Using forced CD image from intent: " + mCdImagePath);
+                } else {
+                    Log.w(TAG, "Forced CD image is missing or unreadable: " + forcedCd0);
+                }
+            }
+
+            try {
+                SharedPreferences.Editor cdEd = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+                if (mCdImagePath != null && !mCdImagePath.trim().isEmpty()) {
+                    cdEd.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, mCdImagePath.trim());
+                    cdEd.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
+                } else {
+                    cdEd.remove(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH);
+                }
+                cdEd.apply();
+            } catch (Throwable ignored) {
+            }
+        }
+
         boolean enableAutoDf0 = false;
         try {
             Intent intent = getIntent();
@@ -3200,6 +3310,7 @@ public class AmiberryActivity extends SDLActivity {
     public static native void nativeSetFloppySoundVolumePercent(int percent);
     public static native void nativeSetEmulatorSoundVolumePercent(int percent);
     public static native int nativeGetVideoAspectMode();
+    public static native String nativeGetRendererDebugInfo();
 
     // Hot-swap a floppy image in the running emulator.
     // drive: 0 = DF0, 1 = DF1.
@@ -3836,12 +3947,36 @@ public class AmiberryActivity extends SDLActivity {
         // Drives / CD overrides
         // CD image (cdimage0) is supported by Amiberry (see amiberry_whdbooter.cpp) in the form:
         //   cdimage0=<path>,image
-        if (p.contains(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)) {
-            String cd0 = p.getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
-            if (cd0 != null && !cd0.trim().isEmpty()) {
-                args.add("-s");
-                args.add("cdimage0=" + cd0.trim() + ",image");
+        String cd0 = null;
+        if (mCdImagePath != null && !mCdImagePath.trim().isEmpty()) {
+            cd0 = mCdImagePath.trim();
+        } else if (p.contains(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)) {
+            cd0 = p.getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
+            if (cd0 != null) cd0 = cd0.trim();
+        }
+        if (cd0 != null && !cd0.isEmpty()) {
+            ResolvedMediaPath resolvedCd0 = resolveForCorePathIfNeeded(cd0, /*wantWrite*/ false);
+            String cdCorePath = (resolvedCd0 != null && resolvedCd0.corePath != null)
+                ? resolvedCd0.corePath.trim()
+                : cd0;
+
+            // Match upstream CD parsing behavior: mount the selected image directly.
+            // For local CUE files, keep FILE refs normalized to basename/case.
+            try {
+                if (!cdCorePath.startsWith("content://")) {
+                    File cueFile = new File(cdCorePath);
+                    if (cueFile.exists() && cueFile.isFile()
+                        && "cue".equals(BootstrapMediaUtils.lowerExt(cueFile.getName()))) {
+                        BootstrapMediaUtils.fixCueTrackFilenameCase(cueFile);
+                    }
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "CUE normalization failed", t);
             }
+
+            args.add("-s");
+            args.add("cdimage0=\"" + escapeForUaeQuoted(cdCorePath) + "\",image");
+            logI("Emitting cdimage0=" + cdCorePath);
         }
 
         boolean isCd32Quickstart = false;
@@ -4134,7 +4269,7 @@ public class AmiberryActivity extends SDLActivity {
         // WHDBooter will configure these based on game requirements
         boolean skipBootstrapSettings = (mWHDLoadFile != null && !mWHDLoadFile.isEmpty());
         
-        if (!skipBootstrapSettings) {
+        if (!skipBootstrapSettings && !isCdOnlyQuickstart) {
             if (p.contains(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE)) {
                 String v = p.getString(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE, null);
                 if (v != null) {
@@ -4180,7 +4315,7 @@ public class AmiberryActivity extends SDLActivity {
             }
         }
 
-        if (!skipBootstrapSettings) {
+        if (!skipBootstrapSettings && !isCdOnlyQuickstart) {
             boolean cpuModelSet = false;
             if (p.contains(UaeOptionKeys.UAE_CPU_MODEL)) {
                 String v = p.getString(UaeOptionKeys.UAE_CPU_MODEL, null);
@@ -4219,13 +4354,13 @@ public class AmiberryActivity extends SDLActivity {
             }
         }
 
-        if (!skipBootstrapSettings && p.contains(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING)) {
+        if (!skipBootstrapSettings && !isCdOnlyQuickstart && p.contains(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING)) {
             boolean v = p.getBoolean(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING, false);
             args.add("-s");
             args.add("cpu_24bit_addressing=" + (v ? "true" : "false"));
         }
 
-        if (!skipBootstrapSettings && p.contains(UaeOptionKeys.UAE_CPU_DATA_CACHE)) {
+        if (!skipBootstrapSettings && !isCdOnlyQuickstart && p.contains(UaeOptionKeys.UAE_CPU_DATA_CACHE)) {
             boolean v = p.getBoolean(UaeOptionKeys.UAE_CPU_DATA_CACHE, false);
             args.add("-s");
             args.add("cpu_data_cache=" + (v ? "true" : "false"));
@@ -4381,30 +4516,30 @@ public class AmiberryActivity extends SDLActivity {
 
         // Re-assert CD-only safety after imported overrides.
         if (isCdOnlyQuickstart) {
-            args.add("-s");
-            args.add("nr_floppies=0");
-            args.add("-s");
-            args.add("floppy0type=-1");
-            args.add("-s");
-            args.add("floppy1type=-1");
-            args.add("-s");
-            args.add("floppy2type=-1");
-            args.add("-s");
-            args.add("floppy3type=-1");
+            addSettingArg(args, "nr_floppies", "0");
+            addSettingArg(args, "floppy0type", "-1");
+            addSettingArg(args, "floppy1type", "-1");
+            addSettingArg(args, "floppy2type", "-1");
+            addSettingArg(args, "floppy3type", "-1");
             if (isCd32Quickstart) {
-                args.add("-s");
-                args.add("cd32cd=1");
+                addCd32SafetyOverrides(args);
             }
         }
 
         String bootMedium = p.getString("boot_medium", "floppy");
         String bootMediumNorm = (bootMedium == null) ? "" : bootMedium.trim().toLowerCase(java.util.Locale.ROOT);
+        boolean hasExplicitFloppySelection =
+            (mDf0DiskImagePath != null && !mDf0DiskImagePath.trim().isEmpty())
+            || (mDf1DiskImagePath != null && !mDf1DiskImagePath.trim().isEmpty())
+            || (mDf2DiskImagePath != null && !mDf2DiskImagePath.trim().isEmpty())
+            || (mDf3DiskImagePath != null && !mDf3DiskImagePath.trim().isEmpty());
         boolean allowFloppyCli = !isCdOnlyQuickstart
-            && !("hd".equals(bootMediumNorm)
+            && (!("hd".equals(bootMediumNorm)
             || "hdf".equals(bootMediumNorm)
             || "cd".equals(bootMediumNorm)
             || "cdrom".equals(bootMediumNorm)
-            || "cd32".equals(bootMediumNorm));
+            || "cd32".equals(bootMediumNorm))
+            || hasExplicitFloppySelection);
 
         if (allowFloppyCli && mDf0DiskImagePath != null && !mDf0DiskImagePath.isEmpty()) {
             args.add("-0");

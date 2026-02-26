@@ -170,6 +170,36 @@ final class BootstrapMediaUtils {
         private BootstrapCueUtils() {
         }
 
+        private static String cueRefBaseName(String ref) {
+            if (ref == null) return "";
+            String normalized = ref.trim().replace('\\', '/');
+            if (normalized.isEmpty()) return "";
+            int slash = normalized.lastIndexOf('/');
+            return (slash >= 0 && slash < normalized.length() - 1)
+                ? normalized.substring(slash + 1).trim()
+                : normalized;
+        }
+
+        private static String parseCueFileRef(String line) {
+            if (line == null) return null;
+            String trimmed = line.trim();
+            if (!trimmed.toUpperCase(Locale.ROOT).startsWith("FILE")) return null;
+            int q1 = trimmed.indexOf('"');
+            int q2 = q1 >= 0 ? trimmed.indexOf('"', q1 + 1) : -1;
+            if (q1 >= 0 && q2 > q1) {
+                return trimmed.substring(q1 + 1, q2);
+            }
+            return null;
+        }
+
+        private static String replaceCueFileRefWithBase(String originalLine, String baseName) {
+            if (originalLine == null || baseName == null || baseName.trim().isEmpty()) return originalLine;
+            int q1 = originalLine.indexOf('"');
+            int q2 = q1 >= 0 ? originalLine.indexOf('"', q1 + 1) : -1;
+            if (q1 < 0 || q2 <= q1) return originalLine;
+            return originalLine.substring(0, q1 + 1) + baseName + originalLine.substring(q2);
+        }
+
         static boolean cueHasMissingTracks(File cueFile) {
             if (cueFile == null || !cueFile.exists()) return true;
             try {
@@ -177,21 +207,22 @@ final class BootstrapMediaUtils {
                 try {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        line = line.trim();
-                        if (line.isEmpty()) continue;
-                        // Typical: FILE "Track 01.bin" BINARY
-                        if (line.toUpperCase(Locale.ROOT).startsWith("FILE")) {
-                            int q1 = line.indexOf('"');
-                            int q2 = q1 >= 0 ? line.indexOf('"', q1 + 1) : -1;
-                            if (q1 >= 0 && q2 > q1) {
-                                String ref = line.substring(q1 + 1, q2);
-                                if (ref != null && !ref.trim().isEmpty()) {
-                                    File track = new File(cueFile.getParentFile(), ref);
-                                    if (!track.exists() || track.length() <= 0) {
-                                        return true;
-                                    }
-                                }
-                            }
+                        String ref = parseCueFileRef(line);
+                        if (ref == null || ref.trim().isEmpty()) continue;
+
+                        File trackExact = new File(cueFile.getParentFile(), ref.trim());
+                        if (trackExact.exists() && trackExact.length() > 0) {
+                            continue;
+                        }
+
+                        String base = cueRefBaseName(ref);
+                        if (base.isEmpty()) {
+                            return true;
+                        }
+
+                        File trackBase = new File(cueFile.getParentFile(), base);
+                        if (!trackBase.exists() || trackBase.length() <= 0) {
+                            return true;
                         }
                     }
                 } finally {
@@ -211,20 +242,11 @@ final class BootstrapMediaUtils {
                 try {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        line = line.trim();
-                        if (line.isEmpty()) continue;
-                        if (line.toUpperCase(Locale.ROOT).startsWith("FILE")) {
-                            int q1 = line.indexOf('"');
-                            int q2 = q1 >= 0 ? line.indexOf('"', q1 + 1) : -1;
-                            if (q1 >= 0 && q2 > q1) {
-                                String ref = line.substring(q1 + 1, q2);
-                                if (ref != null) {
-                                    ref = ref.trim();
-                                    if (!ref.isEmpty()) {
-                                        names.add(ref);
-                                    }
-                                }
-                            }
+                        String ref = parseCueFileRef(line);
+                        if (ref == null) continue;
+                        String base = cueRefBaseName(ref);
+                        if (!base.isEmpty() && !names.contains(base)) {
+                            names.add(base);
                         }
                     }
                 } finally {
@@ -242,42 +264,60 @@ final class BootstrapMediaUtils {
             File[] files = dir.listFiles();
             if (files == null) files = new File[0];
 
+            List<String> lines = new ArrayList<>();
+            boolean changedCueLines = false;
+
             try {
                 java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(cueFile));
                 try {
                     String line;
                     while ((line = br.readLine()) != null) {
-                        line = line.trim();
-                        if (line.isEmpty()) continue;
-                        if (line.toUpperCase(Locale.ROOT).startsWith("FILE")) {
-                            int q1 = line.indexOf('"');
-                            int q2 = q1 >= 0 ? line.indexOf('"', q1 + 1) : -1;
-                            if (q1 >= 0 && q2 > q1) {
-                                String ref = line.substring(q1 + 1, q2);
-                                if (ref == null) continue;
-                                ref = ref.trim();
-                                if (ref.isEmpty()) continue;
-                                // If the CUE references a subpath, leave it alone.
-                                if (ref.contains("/") || ref.contains("\\")) continue;
-
-                                File exact = new File(dir, ref);
-                                if (exact.exists() && exact.length() > 0) continue;
-
-                                for (File f : files) {
-                                    if (f == null || !f.isFile()) continue;
-                                    String n = f.getName();
-                                    if (n != null && n.equalsIgnoreCase(ref)) {
-                                        // Rename track file to match the CUE reference exactly (Android fs is case-sensitive).
-                                        //noinspection ResultOfMethodCallIgnored
-                                        f.renameTo(exact);
-                                        break;
+                        String outLine = line;
+                        String ref = parseCueFileRef(line);
+                        if (ref != null) {
+                            String base = cueRefBaseName(ref);
+                            if (!base.isEmpty()) {
+                                File exact = new File(dir, base);
+                                if (!exact.exists() || exact.length() <= 0) {
+                                    for (File f : files) {
+                                        if (f == null || !f.isFile()) continue;
+                                        String n = f.getName();
+                                        if (n != null && n.equalsIgnoreCase(base)) {
+                                            if (!n.equals(base)) {
+                                                //noinspection ResultOfMethodCallIgnored
+                                                f.renameTo(exact);
+                                            }
+                                            break;
+                                        }
                                     }
+                                }
+
+                                String replaced = replaceCueFileRefWithBase(line, base);
+                                if (!replaced.equals(line)) {
+                                    outLine = replaced;
+                                    changedCueLines = true;
                                 }
                             }
                         }
+                        lines.add(outLine);
                     }
                 } finally {
                     br.close();
+                }
+            } catch (Throwable ignored) {
+                return;
+            }
+
+            if (!changedCueLines) return;
+            try {
+                java.io.BufferedWriter bw = new java.io.BufferedWriter(new java.io.FileWriter(cueFile, false));
+                try {
+                    for (String l : lines) {
+                        bw.write(l);
+                        bw.newLine();
+                    }
+                } finally {
+                    bw.close();
                 }
             } catch (Throwable ignored) {
             }

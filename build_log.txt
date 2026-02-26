@@ -1,1 +1,0 @@
-bash: gradlew.bat: command not found

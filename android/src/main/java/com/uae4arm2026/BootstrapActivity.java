@@ -17,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.RadioGroup;
@@ -192,6 +193,7 @@ public class BootstrapActivity extends Activity {
     private static final int REQ_IMPORT_WHDLOAD = 1030;
 
     private TextView mKickStatus;
+    private android.widget.RadioButton[] mModelRadioButtons;
     private TextView mExtStatus;
     private TextView mCd0Status;
     private TextView mDf0Status;
@@ -1321,6 +1323,12 @@ public class BootstrapActivity extends Activity {
             return;
         }
 
+        int existing = firstActiveDhSlot();
+        if (existing >= 0) {
+            promptDhVolumeNameThen(existing, () -> pickForDhSlot(existing, folder));
+            return;
+        }
+
         List<DhSlot> slots = new ArrayList<>();
         if (!mDh0Added) slots.add(new DhSlot(0, "DH0"));
         if (!mDh1Added) slots.add(new DhSlot(1, "DH1"));
@@ -1334,7 +1342,8 @@ public class BootstrapActivity extends Activity {
         }
 
         if (slots.size() == 1) {
-            enableDhSlotAndPick(slots.get(0).index, folder);
+            int slot = slots.get(0).index;
+            promptDhVolumeNameThen(slot, () -> enableDhSlotAndPick(slot, folder));
             return;
         }
 
@@ -1344,11 +1353,126 @@ public class BootstrapActivity extends Activity {
             .setTitle("Select hard drive slot")
             .setItems(labels, (d, which) -> {
                 if (which >= 0 && which < slots.size()) {
-                    enableDhSlotAndPick(slots.get(which).index, folder);
+                    int slot = slots.get(which).index;
+                    promptDhVolumeNameThen(slot, () -> enableDhSlotAndPick(slot, folder));
                 }
             })
             .setNegativeButton(android.R.string.cancel, null)
             .show();
+    }
+
+    private int firstActiveDhSlot() {
+        if (mDh0Added) return 0;
+        if (mDh1Added) return 1;
+        if (mDh2Added) return 2;
+        if (mDh3Added) return 3;
+        if (mDh4Added) return 4;
+        return -1;
+    }
+
+    private String defaultDhVolumeName(int dhIndex) {
+        return "DH" + dhIndex;
+    }
+
+    private String dhVolumePrefKey(int dhIndex) {
+        switch (dhIndex) {
+            case 0:
+                return PREF_DH0_VOLNAME;
+            case 1:
+                return PREF_DH1_VOLNAME;
+            case 2:
+                return PREF_DH2_VOLNAME;
+            case 3:
+                return PREF_DH3_VOLNAME;
+            case 4:
+                return PREF_DH4_VOLNAME;
+            default:
+                return null;
+        }
+    }
+
+    private String sanitizeDhVolumeName(String raw, int dhIndex) {
+        String s = safeTrim(raw);
+        if (s.isEmpty()) return defaultDhVolumeName(dhIndex);
+        s = s.replaceAll("[^A-Za-z0-9_-]", "_");
+        if (s.length() > 31) s = s.substring(0, 31);
+        if (s.isEmpty()) return defaultDhVolumeName(dhIndex);
+        return s;
+    }
+
+    private String getDhVolumeName(int dhIndex) {
+        String key = dhVolumePrefKey(dhIndex);
+        if (key == null) return defaultDhVolumeName(dhIndex);
+        SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String raw = p.getString(key, null);
+        return sanitizeDhVolumeName(raw, dhIndex);
+    }
+
+    private void setDhVolumeName(int dhIndex, String name) {
+        String key = dhVolumePrefKey(dhIndex);
+        if (key == null) return;
+        String sanitized = sanitizeDhVolumeName(name, dhIndex);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, sanitized).apply();
+    }
+
+    private void promptDhVolumeNameThen(int dhIndex, Runnable onContinue) {
+        if (dhIndex < 0 || dhIndex > 4) {
+            if (onContinue != null) onContinue.run();
+            return;
+        }
+
+        final EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setText(getDhVolumeName(dhIndex));
+        input.setSelectAllOnFocus(true);
+        input.setHint(defaultDhVolumeName(dhIndex));
+
+        new AlertDialog.Builder(this)
+            .setTitle("DH" + dhIndex + " volume name")
+            .setMessage("Enter a device/volume name for this hard drive slot")
+            .setView(input)
+            .setNegativeButton(android.R.string.cancel, null)
+            .setPositiveButton("Continue", (d, which) -> {
+                try {
+                    String entered = input.getText() == null ? "" : input.getText().toString();
+                    setDhVolumeName(dhIndex, entered);
+                } catch (Throwable ignored) {
+                }
+                if (onContinue != null) onContinue.run();
+            })
+            .show();
+    }
+
+    private void pickForDhSlot(int dhIndex, boolean folder) {
+        if (dhIndex == 0) {
+            if (folder) pickDh0Folder(); else pickDh0Hdf();
+            return;
+        }
+        if (dhIndex == 1) {
+            if (folder) pickDh1Folder(); else pickDh1Hdf();
+            return;
+        }
+        if (dhIndex == 2) {
+            if (folder) pickDh2Folder(); else pickDh2Hdf();
+            return;
+        }
+        if (dhIndex == 3) {
+            if (folder) pickDh3Folder(); else pickDh3Hdf();
+            return;
+        }
+        if (dhIndex == 4) {
+            if (folder) pickDh4Folder(); else pickDh4Hdf();
+        }
+    }
+
+    private static final class DhSlot {
+        final int index;
+        final String label;
+
+        DhSlot(int index, String label) {
+            this.index = index;
+            this.label = label;
+        }
     }
 
     private void enableDhSlotAndPick(int dhIndex, boolean folder) {
@@ -1407,6 +1531,129 @@ public class BootstrapActivity extends Activity {
             } else if (dhIndex == 4) {
                 if (folder) pickDh4Folder(); else pickDh4Hdf();
             }
+        }
+    }
+
+    /**
+     * "Restart" — ejects ALL connected media (DF0-DF3, DH0-DH4, CD0),
+     * resets the model back to A500, and refreshes the bootstrap UI to
+     * a clean first-run state.  The emulator is NOT started automatically.
+     */
+    private void performRestart() {
+        try {
+            // Clear all drive 'added' flags
+            mDf1Added = false;
+            mDf2Added = false;
+            mDf3Added = false;
+            mDh0Added = false;
+            mDh1Added = false;
+            mDh2Added = false;
+            mDh3Added = false;
+            mDh4Added = false;
+            mCd0Added = false;
+
+            // Persist cleared states
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREF_SHOW_DF1, false)
+                .putBoolean(PREF_SHOW_DF2, false)
+                .putBoolean(PREF_SHOW_DF3, false)
+                .putBoolean(PREF_SHOW_DH0, false)
+                .putBoolean(PREF_SHOW_DH1, false)
+                .putBoolean(PREF_SHOW_DH2, false)
+                .putBoolean(PREF_SHOW_DH3, false)
+                .putBoolean(PREF_SHOW_DH4, false)
+                .putBoolean(PREF_SHOW_CD0, false)
+                .apply();
+
+            // Remove all media paths from UAE prefs (files on disk are preserved)
+            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .remove(UaeOptionKeys.UAE_DRIVE_DF0_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DF1_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DF2_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DF3_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF0_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR0_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF1_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR1_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF2_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR2_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF3_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR3_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF4_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR4_PATH)
+                .apply();
+
+            // Clear WHDBooter cached game/settings
+            getSharedPreferences("whdbooter", MODE_PRIVATE)
+                .edit()
+                .clear()
+                .apply();
+
+            // Null out all in-memory media references
+            mSelectedDf0 = null; mSelectedDf0Path = null; mDf0SourceName = null;
+            mSelectedDf1 = null; mSelectedDf1Path = null; mDf1SourceName = null;
+            mSelectedDf2 = null; mSelectedDf2Path = null; mDf2SourceName = null;
+            mSelectedDf3 = null; mSelectedDf3Path = null; mDf3SourceName = null;
+            mSelectedCd0 = null; mSelectedCd0Path = null; mCd0SourceName = null;
+            mSelectedDh0Hdf = null; mSelectedDh0HdfPath = null; mSelectedDh0Dir = null; mDh0SourceName = null;
+            mSelectedDh1Hdf = null; mSelectedDh1HdfPath = null; mSelectedDh1Dir = null; mDh1SourceName = null;
+            mSelectedDh2Hdf = null; mSelectedDh2HdfPath = null; mSelectedDh2Dir = null; mDh2SourceName = null;
+            mSelectedDh3Hdf = null; mSelectedDh3HdfPath = null; mSelectedDh3Dir = null; mDh3SourceName = null;
+            mSelectedDh4Hdf = null; mSelectedDh4HdfPath = null; mSelectedDh4Dir = null; mDh4SourceName = null;
+
+            saveSourceNames();
+
+            // Reset model to A500 (index 0)
+            if (mQsModelSpinner != null && mQsModelSpinner.getCount() > 0) {
+                mQsModelSpinner.setSelection(0);
+            }
+            syncRadioToSpinner();
+            updateModelImage();
+
+            refreshStatus();
+            Toast.makeText(this, "All media ejected — device reset", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "performRestart failed", t);
+        }
+    }
+
+    /**
+     * "Cold Reset" — fully resets the system (kills the running emulator process
+     * and relaunches), but keeps the current hardware setup: model selection,
+     * which drives are added, and which media is inserted.
+     */
+    private void performColdReset() {
+        try {
+            android.util.Log.i(TAG, "Cold Reset requested (keep HW, restart emulator)");
+
+            // Save current media to UAE prefs so the emulator picks them up on relaunch.
+            applyKickstartAutoForCurrentModel(false);
+
+            String qsModel = getSelectedQsModelId();
+            boolean isCdOnly = isCdOnlyModel();
+
+            // If an emulator is already running, kill it and relaunch with current config.
+            if (mLaunchedFromEmulatorMenu) {
+                requestEmulatorRestartAndFinish();
+            } else {
+                // Not launched from emu menu — just (re)start the emulator with current config.
+                startEmulator();
+            }
+        } catch (Throwable t) {
+            android.util.Log.w(TAG, "performColdReset failed", t);
         }
     }
 
@@ -1918,6 +2165,7 @@ public class BootstrapActivity extends Activity {
 
     private static final String PREFS_NAME = "bootstrap";
     private static final String PREF_WALKTHROUGH_COMPLETED = "walkthrough_completed";
+    private static final String PREF_FORCE_WALKTHROUGH_ON_NEXT_START = "force_walkthrough_on_next_start";
     private static final String PREF_LAST_APP_VERSION_CODE = "last_app_version_code";
     private static final String PREF_LAST_APP_UPDATE_TIME = "last_app_update_time";
     private static final String PREF_KICK_SRC = "kick_src";
@@ -1953,6 +2201,11 @@ public class BootstrapActivity extends Activity {
     private static final String PREF_DH0_MODE = "dh0_mode";
     private static final String DH0_MODE_HDF = "hdf";
     private static final String DH0_MODE_DIR = "dir";
+    private static final String PREF_DH0_VOLNAME = "dh0_volname";
+    private static final String PREF_DH1_VOLNAME = "dh1_volname";
+    private static final String PREF_DH2_VOLNAME = "dh2_volname";
+    private static final String PREF_DH3_VOLNAME = "dh3_volname";
+    private static final String PREF_DH4_VOLNAME = "dh4_volname";
 
     private static final String PREF_DH1_MODE = "dh1_mode";
     private static final String DH1_MODE_HDF = "hdf";
@@ -2011,7 +2264,9 @@ public class BootstrapActivity extends Activity {
     private static int indexOfModelId(String cliId, int defIdx) {
         if (cliId == null) return defIdx;
         for (int i = 0; i < QS_MODELS.length; i++) {
-            if (cliId.equalsIgnoreCase(QS_MODELS[i].prefsId)) return i;
+            if (cliId.equalsIgnoreCase(QS_MODELS[i].prefsId) || cliId.equalsIgnoreCase(QS_MODELS[i].cliId)) {
+                return i;
+            }
         }
         return defIdx;
     }
@@ -2208,6 +2463,79 @@ public class BootstrapActivity extends Activity {
         return new File(getInternalDisksDir(), INTERNAL_CD0_DIR);
     }
 
+    private DocumentFile resolveSafJoinedDirectory(String joinedOrTreeUri) {
+        if (joinedOrTreeUri == null) return null;
+        String value = joinedOrTreeUri.trim();
+        if (value.isEmpty()) return null;
+        try {
+            if (ConfigStorage.isSafJoinedPath(value)) {
+                ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(value);
+                if (sp == null || sp.treeUri == null || sp.treeUri.trim().isEmpty()) return null;
+                DocumentFile cur = DocumentFile.fromTreeUri(this, Uri.parse(sp.treeUri));
+                if (cur == null) return null;
+
+                String rel = sp.relPath == null ? "" : sp.relPath.trim();
+                if (rel.startsWith("/")) rel = rel.substring(1);
+                if (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+                if (!rel.isEmpty()) {
+                    String[] parts = rel.split("/");
+                    for (String part : parts) {
+                        if (part == null) continue;
+                        String seg = part.trim();
+                        if (seg.isEmpty()) continue;
+                        DocumentFile next = cur.findFile(seg);
+                        if (next == null) return null;
+                        cur = next;
+                    }
+                }
+                return (cur.exists() && cur.isDirectory()) ? cur : null;
+            }
+
+            if (isContentUriString(value)) {
+                DocumentFile cur = DocumentFile.fromTreeUri(this, Uri.parse(value));
+                if (cur != null && cur.exists() && cur.isDirectory()) return cur;
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    private boolean tryImportMissingCueTracksFromConfiguredCdroms(File cueFile, List<String> tracks) {
+        if (cueFile == null || !cueFile.exists() || tracks == null || tracks.isEmpty()) return false;
+        try {
+            String cdromsPath = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                .getString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, null);
+            DocumentFile cdRoot = resolveSafJoinedDirectory(cdromsPath);
+            if (cdRoot == null) return false;
+
+            File cd0Dir = getInternalCd0Dir();
+            ensureDir(cd0Dir);
+
+            boolean copiedAny = false;
+            for (String trackName : tracks) {
+                if (trackName == null || trackName.trim().isEmpty()) continue;
+                File dest = new File(cd0Dir, trackName);
+                if (dest.exists() && dest.isFile() && dest.length() > 0) continue;
+
+                DocumentFile src = findFileByNameIgnoreCase(cdRoot, trackName, 6);
+                if (src == null || !src.exists() || !src.isFile()) {
+                    return false;
+                }
+                if (!copyDocumentFileTo(src, dest)) {
+                    return false;
+                }
+                copiedAny = true;
+            }
+
+            if (copiedAny) {
+                fixCueTrackFilenameCase(cueFile);
+            }
+            return !cueHasMissingTracks(cueFile);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private File getInternalHarddrivesDir() {
         return new File(getAmiberryBaseDir(), INTERNAL_HARDDRIVES_DIR);
     }
@@ -2269,7 +2597,7 @@ public class BootstrapActivity extends Activity {
             .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, false)
             .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, true)
             .putString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, hdf.getAbsolutePath())
-            .putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, "DH0")
+            .putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, getDhVolumeName(0))
             .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_READONLY, false)
             .apply();
     }
@@ -2336,7 +2664,7 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, false);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, true);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, uriString);
-                e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, "DH0");
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, getDhVolumeName(0));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_READONLY, !hasWrite);
             } else if (dhIndex == 1) {
                 mSelectedDh1Dir = null;
@@ -2348,7 +2676,7 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, false);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, true);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_PATH, uriString);
-                e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME, "DH1");
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME, getDhVolumeName(1));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_READONLY, !hasWrite);
             } else if (dhIndex == 2) {
                 mSelectedDh2Dir = null;
@@ -2360,7 +2688,7 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED, false);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED, true);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF2_PATH, uriString);
-                e.putString(UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME, "DH2");
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME, getDhVolumeName(2));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF2_READONLY, !hasWrite);
             } else if (dhIndex == 3) {
                 mSelectedDh3Dir = null;
@@ -2372,7 +2700,7 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED, false);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED, true);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF3_PATH, uriString);
-                e.putString(UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME, "DH3");
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME, getDhVolumeName(3));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF3_READONLY, !hasWrite);
             } else if (dhIndex == 4) {
                 mSelectedDh4Dir = null;
@@ -2384,7 +2712,7 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, false);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, true);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF4_PATH, uriString);
-                e.putString(UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME, "DH4");
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME, getDhVolumeName(4));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_READONLY, !hasWrite);
             }
 
@@ -2431,8 +2759,9 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, ok);
                 if (ok) {
                     e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_PATH, mSelectedDh0Dir.getAbsolutePath());
-                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME, "DH0");
-                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME, "DH0");
+                    String vol = getDhVolumeName(0);
+                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME, vol);
+                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME, vol);
                     e.putInt(UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI, 10);
                     e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_READONLY, false);
                 }
@@ -2444,13 +2773,19 @@ public class BootstrapActivity extends Activity {
                     hdfPath = mSelectedDh0HdfPath.trim();
                 } else if (mSelectedDh0Hdf != null) {
                     hdfPath = mSelectedDh0Hdf.getAbsolutePath();
+                } else {
+                    String persisted = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                        .getString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, null);
+                    if (persisted != null && !persisted.trim().isEmpty()) {
+                        hdfPath = persisted.trim();
+                    }
                 }
 
                 boolean ok = isReadableMediaPath(hdfPath);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, ok);
                 if (ok) {
                     e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, hdfPath);
-                    e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, "DH0");
+                    e.putString(UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME, getDhVolumeName(0));
                     // SAF is not inherently read-only; honor persisted or actual write access.
                     boolean readOnly = false;
                     if (isContentUriString(hdfPath)) {
@@ -2474,8 +2809,9 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, ok);
                 if (ok) {
                     e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_PATH, mSelectedDh1Dir.getAbsolutePath());
-                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME, "DH1");
-                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME, "DH1");
+                    String vol = getDhVolumeName(1);
+                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME, vol);
+                    e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME, vol);
                     e.putInt(UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI, -128);
                     e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_READONLY, false);
                 }
@@ -2486,12 +2822,18 @@ public class BootstrapActivity extends Activity {
                     hdfPath = mSelectedDh1HdfPath.trim();
                 } else if (mSelectedDh1Hdf != null) {
                     hdfPath = mSelectedDh1Hdf.getAbsolutePath();
+                } else {
+                    String persisted = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                        .getString(UaeOptionKeys.UAE_DRIVE_HDF1_PATH, null);
+                    if (persisted != null && !persisted.trim().isEmpty()) {
+                        hdfPath = persisted.trim();
+                    }
                 }
                 boolean ok = isReadableMediaPath(hdfPath);
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, ok);
                 if (ok) {
                     e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_PATH, hdfPath);
-                    e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME, "DH1");
+                    e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME, getDhVolumeName(1));
                     boolean readOnly = false;
                     if (isContentUriString(hdfPath)) {
                         boolean hasWrite = hasPersistedWritePermission(hdfPath) || canWriteContentUri(hdfPath);
@@ -2654,6 +2996,7 @@ public class BootstrapActivity extends Activity {
         maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_CDROMS_DIR);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
         }
@@ -3183,6 +3526,39 @@ public class BootstrapActivity extends Activity {
                 cdPath = mSelectedCd0Path.trim();
             } else if (mSelectedCd0 != null) {
                 cdPath = mSelectedCd0.getAbsolutePath();
+            } else {
+                try {
+                    File cd0Dir = getInternalCd0Dir();
+                    File[] files = (cd0Dir != null && cd0Dir.exists() && cd0Dir.isDirectory()) ? cd0Dir.listFiles() : null;
+                    File best = null;
+                    if (files != null) {
+                        for (File f : files) {
+                            if (f == null || !f.isFile() || f.length() <= 0) continue;
+                            String n = f.getName();
+                            if (n == null) continue;
+                            String ext = lowerExt(n);
+                            if (!("cue".equals(ext) || "iso".equals(ext) || "chd".equals(ext) || "bin".equals(ext))) continue;
+                            if (best == null || f.lastModified() > best.lastModified()) {
+                                best = f;
+                            }
+                        }
+                    }
+                    if (best != null) {
+                        mSelectedCd0 = best;
+                        mSelectedCd0Path = null;
+                        cdPath = best.getAbsolutePath();
+                        if (mCd0SourceName == null || mCd0SourceName.trim().isEmpty()) {
+                            mCd0SourceName = best.getName();
+                            saveSourceNames();
+                        }
+                        getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cdPath)
+                            .putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true)
+                            .apply();
+                    }
+                } catch (Throwable ignored) {
+                }
             }
 
             if (!isReadableMediaPath(cdPath)) {
@@ -3198,21 +3574,8 @@ public class BootstrapActivity extends Activity {
                 return;
             }
 
-            if (mSelectedCd0 == null && isContentUriString(cdPath)) {
-                if ("cue".equals(lowerExt(mCd0SourceName))) {
-                    showReselectDialog(
-                        "Re-select CUE/BIN",
-                        "This CD entry uses a CUE file via SAF URI.\n\nPlease re-select the CUE (and BIN tracks) so the app can import the full set locally.",
-                        this::pickCdImage0
-                    );
-                    return;
-                }
-            } else if (mSelectedCd0 != null && "cue".equals(lowerExt(mSelectedCd0.getName()))) {
+            if (mSelectedCd0 != null && "cue".equals(lowerExt(mSelectedCd0.getName()))) {
                 fixCueTrackFilenameCase(mSelectedCd0);
-                if (cueHasMissingTracks(mSelectedCd0)) {
-                    Toast.makeText(this, "CUE needs its BIN tracks. Import CUE + BIN (multi-select) or use an ISO/CHD.", Toast.LENGTH_LONG).show();
-                    return;
-                }
             }
         }
 
@@ -3231,17 +3594,24 @@ public class BootstrapActivity extends Activity {
                     hdfPath = mSelectedDh0HdfPath.trim();
                 } else if (mSelectedDh0Hdf != null) {
                     hdfPath = mSelectedDh0Hdf.getAbsolutePath();
+                } else {
+                    try {
+                        String persisted = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                            .getString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, null);
+                        if (persisted != null && !persisted.trim().isEmpty()) {
+                            hdfPath = persisted.trim();
+                            mSelectedDh0Hdf = null;
+                            mSelectedDh0HdfPath = hdfPath;
+                        }
+                    } catch (Throwable ignored) {
+                    }
                 }
 
                 // Only prompt for HDF if user explicitly added DH0 but didn't select a file
                 if (hdfPath == null || hdfPath.trim().isEmpty()) {
-                    // DH0 was added but no HDF selected - just disable it and allow floppy boot
-                    mDh0Added = false;
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(PREF_SHOW_DH0, false)
-                        .apply();
-                    // Continue to boot without hard drive
+                    Toast.makeText(this, "Select a DH0 HDF before starting", Toast.LENGTH_SHORT).show();
+                    pickDh0Hdf();
+                    return;
                 } else if (!isReadableMediaPath(hdfPath)) {
                     if (isContentUriString(hdfPath)) {
                         showReselectDialog(
@@ -3345,6 +3715,30 @@ public class BootstrapActivity extends Activity {
         } catch (Throwable ignored) {
         }
 
+        // Persist CD selection synchronously so AmiberryActivity always sees the latest
+        // cdimage0 when Start is pressed (avoids apply()/read race on fast launches).
+        try {
+            String cdPathNow = null;
+            if (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty()) {
+                cdPathNow = mSelectedCd0Path.trim();
+            } else if (mSelectedCd0 != null && mSelectedCd0.exists() && mSelectedCd0.isFile() && mSelectedCd0.length() > 0) {
+                cdPathNow = mSelectedCd0.getAbsolutePath();
+            }
+
+            if (cdPathNow != null && isReadableMediaPath(cdPathNow)) {
+                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cdPathNow)
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true)
+                    .commit();
+                LogUtil.i(TAG, "Launch commit cdimage0=" + cdPathNow);
+            } else if (isCdOnly) {
+                LogUtil.i(TAG, "Launch commit missing/invalid cdimage0 for CD-only model");
+            }
+        } catch (Throwable t) {
+            LogUtil.i(TAG, "Launch commit cdimage0 failed", t);
+        }
+
         // Ensure ROM overrides in prefs reflect the current Quickstart selections.
         // AmiberryActivity builds its final CLI args from UAE prefs (including kickstart_ext_rom_file).
         try {
@@ -3422,6 +3816,17 @@ public class BootstrapActivity extends Activity {
                 df0LaunchPath = mSelectedDf0Path.trim();
             }
             if (df0LaunchPath != null) {
+                try {
+                    SharedPreferences.Editor bootEd = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+                    bootEd.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, false);
+                    bootEd.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, false);
+                    bootEd.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, false);
+                    bootEd.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, false);
+                    bootEd.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, false);
+                    bootEd.apply();
+                } catch (Throwable ignored) {
+                }
+
                 i.putExtra(AmiberryActivity.EXTRA_DF0_DISK_FILE, df0LaunchPath);
                 if (mDf0SourceName != null && !mDf0SourceName.trim().isEmpty()) {
                     i.putExtra(AmiberryActivity.EXTRA_DF0_SOURCE_NAME, mDf0SourceName.trim());
@@ -3437,6 +3842,28 @@ public class BootstrapActivity extends Activity {
             if (df1LaunchPath != null) {
                 i.putExtra(AmiberryActivity.EXTRA_DF1_DISK_FILE, df1LaunchPath);
             }
+        }
+
+        String cdLaunchPath = null;
+        if (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty()) {
+            cdLaunchPath = mSelectedCd0Path.trim();
+        } else if (mSelectedCd0 != null && mSelectedCd0.exists() && mSelectedCd0.isFile() && mSelectedCd0.length() > 0) {
+            cdLaunchPath = mSelectedCd0.getAbsolutePath();
+        } else {
+            try {
+                String prefCd = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
+                if (prefCd != null && !prefCd.trim().isEmpty()) {
+                    cdLaunchPath = prefCd.trim();
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (cdLaunchPath != null && isReadableMediaPath(cdLaunchPath)) {
+            i.putExtra(AmiberryActivity.EXTRA_CD_IMAGE0_FILE, cdLaunchPath);
+            LogUtil.i(TAG, "Passing forced CD image via intent: " + cdLaunchPath);
+        } else if (isCdOnly) {
+            LogUtil.i(TAG, "No readable CD path available for forced intent extra");
         }
 
         // Native menu replaces Amiberry's GUI.
@@ -3809,7 +4236,12 @@ public class BootstrapActivity extends Activity {
         }
         int rtgMode = getSelectedRtgMode();
         boolean rtg = rtgMode != RTG_MODE_OFF;
-        e.putBoolean(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING, rtg ? false : is24BitAddressing(cpuModel));
+        boolean cpu24bit = rtg ? false : is24BitAddressing(cpuModel);
+        if ("CD32".equalsIgnoreCase(modelId)) {
+            // Keep CD32 aligned with upstream quickstart defaults (68020 + 24-bit address space).
+            cpu24bit = true;
+        }
+        e.putBoolean(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING, cpu24bit);
         e.putBoolean(UaeOptionKeys.UAE_CPU_COMPATIBLE, inferCpuCompatibleDefault(modelId));
         e.putBoolean(UaeOptionKeys.UAE_CPU_DATA_CACHE, false);
         String cpuSpeed = inferCpuSpeedDefault(modelId);
@@ -4962,7 +5394,16 @@ public class BootstrapActivity extends Activity {
     private static boolean isValidCdExtension(String name) {
         if (name == null) return false;
         String ext = lowerExt(name);
-        return "iso".equals(ext) || "cue".equals(ext) || "bin".equals(ext) || "chd".equals(ext);
+        return "iso".equals(ext)
+            || "cue".equals(ext)
+            || "bin".equals(ext)
+            || "chd".equals(ext)
+            || "wav".equals(ext)
+            || "flac".equals(ext)
+            || "mp3".equals(ext)
+            || "ogg".equals(ext)
+            || "aiff".equals(ext)
+            || "aif".equals(ext);
     }
 
     private boolean validateAndRejectIfWrongExtension(Uri uri, String displayName, String[] allowed, String hint) {
@@ -5027,14 +5468,37 @@ public class BootstrapActivity extends Activity {
             boolean updatedByInstallTime = currentUpdateTime > 0L && currentUpdateTime != lastSeenUpdateTime;
 
             if (updatedByVersion || updatedByInstallTime) {
-                prefs.edit()
+                // Only invalidate SAF/path prompt flags if the SAF permission is actually gone;
+                // don't nag the user on every debug install when permission is still valid.
+                boolean safPermissionStillValid = false;
+                try {
+                    SharedPreferences uaePrefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                    String parentTree = uaePrefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
+                    if (parentTree != null && !parentTree.trim().isEmpty() && isContentUriString(parentTree)) {
+                        safPermissionStillValid = hasPersistedReadPermission(parentTree)
+                            && hasPersistedWritePermission(parentTree);
+                    } else if (parentTree == null || parentTree.trim().isEmpty()) {
+                        // No path configured at all — treat as first run.
+                        safPermissionStillValid = false;
+                    } else {
+                        // Non-SAF/local path configured — no permission needed.
+                        safPermissionStillValid = true;
+                    }
+                } catch (Throwable ignored) {
+                }
+
+                SharedPreferences.Editor ed = prefs.edit()
                     .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
                     .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
-                    .putBoolean(PREF_WALKTHROUGH_COMPLETED, false)
-                    .putBoolean(PREF_FIRST_RUN_DONE, false)
-                    .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, false)
-                    .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, false)
-                    .apply();
+                    .putBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, true);
+
+                if (!safPermissionStillValid) {
+                    ed.putBoolean(PREF_WALKTHROUGH_COMPLETED, false)
+                      .putBoolean(PREF_FIRST_RUN_DONE, false)
+                      .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, false)
+                      .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, false);
+                }
+                ed.apply();
             } else if (currentVersion != lastSeenVersion || currentUpdateTime != lastSeenUpdateTime) {
                 prefs.edit()
                     .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
@@ -5049,55 +5513,17 @@ public class BootstrapActivity extends Activity {
         SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         if (prefs.getBoolean(PREF_FIRST_RUN_DONE, false)) return;
 
-        // Create the uae4arm sub-folder tree on external storage (best-effort).
-        // If external storage is unavailable, we fall back to internal files dir.
-        try {
-            java.io.File externalBase = null;
-            java.io.File[] externalDirs = getExternalFilesDirs(null);
-            if (externalDirs != null) {
-                for (java.io.File d : externalDirs) {
-                    if (d != null && d.canWrite()) { externalBase = d; break; }
-                }
-            }
-            if (externalBase == null) externalBase = getFilesDir();
-
-            // We create the folder tree inside the public Downloads folder if available,
-            // otherwise alongside app-private external files.
-            java.io.File publicExternal = null;
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                // Android 9 and below: can write to public storage without permission.
-                java.io.File downloads = android.os.Environment.getExternalStoragePublicDirectory(
-                    android.os.Environment.DIRECTORY_DOWNLOADS);
-                if (downloads != null && downloads.canWrite()) {
-                    publicExternal = new java.io.File(downloads, "uae4arm");
-                }
-            }
-            // Fallback: use app-private external storage (always accessible, no permission needed).
-            java.io.File uaeBase = (publicExternal != null) ? publicExternal
-                : new java.io.File(externalBase, "uae4arm");
-
-            String[] subFolders = {"kickstarts", "disks", "harddrives", "conf", "configs", "cdroms", "savestates", "whdboot", "lha"};
-            uaeBase.mkdirs();
-            for (String sf : subFolders) {
-                new java.io.File(uaeBase, sf).mkdirs();
-            }
-
-            LogUtil.i(TAG, "First-run: created uae4arm folder structure at: " + uaeBase.getAbsolutePath());
-        } catch (Throwable ignored) {
-        }
-
         // Show dialog explaining the setup and asking user to grant SAF access.
         try {
             new AlertDialog.Builder(this)
                 .setTitle("Welcome to UAE4ARM 2026")
                 .setMessage(
-                    "The app has created a \u2018uae4arm\u2019 folder for your games and ROMs.\n\n" +
-                    "Please grant permission to that folder so the app can read your Kickstart ROMs, " +
-                    "floppy images, and hard drive files directly from storage.\n\n" +
-                    "Tap \u201cGrant Access\u201d and navigate to the \u2018uae4arm\u2019 folder.")
+                    "Choose a folder to use for your ROMs and media files.\n\n" +
+                    "The app will not create folders automatically during setup.\n\n" +
+                    "Tap \u201cGrant Access\u201d and pick the folder you want to use.")
                 .setPositiveButton("Grant Access", (d, w) -> {
                     prefs.edit().putBoolean(PREF_FIRST_RUN_DONE, true).apply();
-                    // Open the standard SAF tree picker so user can grant access to the uae4arm folder.
+                    // Open the standard SAF tree picker so user can grant access to a user-selected folder.
                     Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
                         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
@@ -5172,6 +5598,726 @@ public class BootstrapActivity extends Activity {
         return isReadableMediaPath(df1Path);
     }
 
+    private boolean hasDf2() {
+        String df2Path = (mSelectedDf2Path != null && !mSelectedDf2Path.trim().isEmpty())
+            ? mSelectedDf2Path
+            : (mSelectedDf2 != null ? mSelectedDf2.getAbsolutePath() : null);
+        return isReadableMediaPath(df2Path);
+    }
+
+    private boolean hasDf3() {
+        String df3Path = (mSelectedDf3Path != null && !mSelectedDf3Path.trim().isEmpty())
+            ? mSelectedDf3Path
+            : (mSelectedDf3 != null ? mSelectedDf3.getAbsolutePath() : null);
+        return isReadableMediaPath(df3Path);
+    }
+
+    private void setFloppySlotIndicator(TextView dot, android.widget.ImageView mini, boolean connected, boolean hasMedia, String label) {
+        if (dot != null) {
+            dot.setText((hasMedia ? "● " : "○ ") + label);
+            dot.setVisibility(connected ? View.VISIBLE : View.GONE);
+            dot.setEnabled(connected);
+            if (connected) {
+                dot.setAlpha(1.0f);
+                dot.setBackgroundColor(hasMedia ? 0x5534A853 : 0x332F80ED);
+            }
+        }
+        if (mini != null) {
+            mini.setVisibility(connected ? View.VISIBLE : View.GONE);
+            mini.setAlpha(hasMedia ? 1.0f : 0.45f);
+        }
+    }
+
+    /** Rebuild the drives strip and old panel stubs. */
+    private void updateFloppyGraphicPanel(boolean cdOnly) {
+        rebuildDrivesStrip(cdOnly);
+    }
+
+    /** Rebuild the horizontal drives strip as fixed slots (4x DF + spacer + 7x storage/media). */
+    private void rebuildDrivesStrip(boolean cdOnly) {
+        LinearLayout strip = findViewById(R.id.drivesStripContent);
+        HorizontalScrollView stripScroll = findViewById(R.id.drivesStrip);
+        if (strip == null) return;
+        strip.removeAllViews();
+
+        if (cdOnly) {
+            if (stripScroll != null) stripScroll.setVisibility(View.GONE);
+            return;
+        }
+
+        final float density = getResources().getDisplayMetrics().density;
+        final int iconSizePx = (int)(56 * density);
+        final int marginPx = (int)(4 * density);
+
+        int dfResId = getResources().getIdentifier("featured_drive_df_external", "drawable", getPackageName());
+        if (dfResId == 0) dfResId = R.drawable.featured_default;
+        int hdResId = getResources().getIdentifier("featured_drive_dh0", "drawable", getPackageName());
+        if (hdResId == 0) hdResId = R.drawable.featured_default;
+        int cdResId = getResources().getIdentifier("featured_cd32", "drawable", getPackageName());
+        if (cdResId == 0) cdResId = R.drawable.featured_default;
+        int lhaResId = getResources().getIdentifier("featured_whdload", "drawable", getPackageName());
+        if (lhaResId == 0) lhaResId = hdResId;
+
+        addDriveIcon(strip, dfResId, "DF0", true, hasDf0(), iconSizePx, 0,
+            v -> onFloppySlotTapped(0), null, getDriveMediaName("DF", 0));
+        addDriveIcon(strip, dfResId, "DF1", isDfSlotEnabled(1), hasDf1(), iconSizePx, marginPx,
+            v -> onFloppySlotTapped(1), v -> { promptRemoveExternalDrive(); return true; },
+            getDriveMediaName("DF", 1));
+        addDriveIcon(strip, dfResId, "DF2", isDfSlotEnabled(2), hasDf2(), iconSizePx, marginPx,
+            v -> onFloppySlotTapped(2), v -> { promptRemoveExternalDrive(); return true; },
+            getDriveMediaName("DF", 2));
+        addDriveIcon(strip, dfResId, "DF3", isDfSlotEnabled(3), hasDf3(), iconSizePx, marginPx,
+            v -> onFloppySlotTapped(3), v -> { promptRemoveExternalDrive(); return true; },
+            getDriveMediaName("DF", 3));
+
+        View spacer = new View(this);
+        LinearLayout.LayoutParams spacerLp = new LinearLayout.LayoutParams((int) (12 * density), 1);
+        spacerLp.setMargins((int) (8 * density), 0, (int) (8 * density), 0);
+        spacer.setLayoutParams(spacerLp);
+        strip.addView(spacer);
+
+        addDriveIcon(strip, hdResId, "DH0", isDhSlotEnabled(0), hasDhMedia(0), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(0), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 0));
+        addDriveIcon(strip, hdResId, "DH1", isDhSlotEnabled(1), hasDhMedia(1), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(1), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 1));
+        addDriveIcon(strip, hdResId, "DH2", isDhSlotEnabled(2), hasDhMedia(2), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(2), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 2));
+        addDriveIcon(strip, hdResId, "DH3", isDhSlotEnabled(3), hasDhMedia(3), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(3), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 3));
+        addDriveIcon(strip, hdResId, "DH4", isDhSlotEnabled(4), hasDhMedia(4), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(4), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 4));
+        addDriveIcon(strip, cdResId, "CD0", isCdSlotEnabled(), hasCd0(), iconSizePx, marginPx,
+            v -> onCdSlotTapped(), null, getDriveMediaName("CD", 0));
+        addDriveIcon(strip, lhaResId, "LHA", true, false, iconSizePx, marginPx,
+            v -> startActivity(new Intent(this, WHDBooterActivity.class)), null, "(WHDLoad)");
+
+        if (stripScroll != null) {
+            stripScroll.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private boolean isDfSlotEnabled(int slot) {
+        switch (slot) {
+            case 1: return mDf1Added || hasDf1();
+            case 2: return mDf2Added || hasDf2();
+            case 3: return mDf3Added || hasDf3();
+            default: return true;
+        }
+    }
+
+    private boolean isDhSlotEnabled(int slot) {
+        switch (slot) {
+            case 0: return mDh0Added || hasDhMedia(0);
+            case 1: return mDh1Added || hasDhMedia(1);
+            case 2: return mDh2Added || hasDhMedia(2);
+            case 3: return mDh3Added || hasDhMedia(3);
+            case 4: return mDh4Added || hasDhMedia(4);
+            default: return false;
+        }
+    }
+
+    private boolean isCdSlotEnabled() {
+        return mCd0Added || hasCd0();
+    }
+
+    private boolean hasDhMedia(int slot) {
+        switch (slot) {
+            case 0:
+                return (mSelectedDh0Dir != null && mSelectedDh0Dir.exists() && mSelectedDh0Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh0HdfPath)
+                    || (mSelectedDh0Hdf != null && mSelectedDh0Hdf.exists() && mSelectedDh0Hdf.isFile() && mSelectedDh0Hdf.canRead());
+            case 1:
+                return (mSelectedDh1Dir != null && mSelectedDh1Dir.exists() && mSelectedDh1Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh1HdfPath)
+                    || (mSelectedDh1Hdf != null && mSelectedDh1Hdf.exists() && mSelectedDh1Hdf.isFile() && mSelectedDh1Hdf.canRead());
+            case 2:
+                return (mSelectedDh2Dir != null && mSelectedDh2Dir.exists() && mSelectedDh2Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh2HdfPath)
+                    || (mSelectedDh2Hdf != null && mSelectedDh2Hdf.exists() && mSelectedDh2Hdf.isFile() && mSelectedDh2Hdf.canRead());
+            case 3:
+                return (mSelectedDh3Dir != null && mSelectedDh3Dir.exists() && mSelectedDh3Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh3HdfPath)
+                    || (mSelectedDh3Hdf != null && mSelectedDh3Hdf.exists() && mSelectedDh3Hdf.isFile() && mSelectedDh3Hdf.canRead());
+            case 4:
+                return (mSelectedDh4Dir != null && mSelectedDh4Dir.exists() && mSelectedDh4Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh4HdfPath)
+                    || (mSelectedDh4Hdf != null && mSelectedDh4Hdf.exists() && mSelectedDh4Hdf.isFile() && mSelectedDh4Hdf.canRead());
+            default:
+                return false;
+        }
+    }
+
+    private void onCdSlotTapped() {
+        if (!mCd0Added) {
+            mCd0Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
+        }
+        showMediaSwapperDialog(MEDIA_SECTION_CD);
+    }
+
+    private void onHardDriveSlotTapped(int slot) {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model doesn't use hard drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        SharedPreferences.Editor ed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        if (slot == 0 && !mDh0Added) {
+            mDh0Added = true;
+            ed.putBoolean(PREF_SHOW_DH0, true).apply();
+        } else if (slot == 1 && !mDh1Added) {
+            mDh1Added = true;
+            ed.putBoolean(PREF_SHOW_DH1, true).apply();
+        } else if (slot == 2 && !mDh2Added) {
+            mDh2Added = true;
+            ed.putBoolean(PREF_SHOW_DH2, true).apply();
+        } else if (slot == 3 && !mDh3Added) {
+            mDh3Added = true;
+            ed.putBoolean(PREF_SHOW_DH3, true).apply();
+        } else if (slot == 4 && !mDh4Added) {
+            mDh4Added = true;
+            ed.putBoolean(PREF_SHOW_DH4, true).apply();
+        }
+        refreshStatus();
+
+        final String[] options = new String[]{"Choose HDF file", "Choose folder", "Clear slot"};
+        new AlertDialog.Builder(this)
+            .setTitle("DH" + slot)
+            .setItems(options, (d, which) -> {
+                if (which == 0) {
+                    if (slot == 0) pickDh0Hdf();
+                    else if (slot == 1) pickDh1Hdf();
+                    else if (slot == 2) pickDh2Hdf();
+                    else if (slot == 3) pickDh3Hdf();
+                    else pickDh4Hdf();
+                } else if (which == 1) {
+                    if (slot == 0) pickDh0Folder();
+                    else if (slot == 1) pickDh1Folder();
+                    else if (slot == 2) pickDh2Folder();
+                    else if (slot == 3) pickDh3Folder();
+                    else pickDh4Folder();
+                } else {
+                    if (slot == 0) {
+                        clearDh0FromUaePrefs();
+                    } else if (slot == 1) {
+                        removeDh1CompletelyFromUaePrefs();
+                    } else {
+                        removeDhCompletelyFromUaePrefs(slot);
+                    }
+                    refreshStatus();
+                }
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    /** Get the display name for media in the given drive slot. */
+    private String getDriveMediaName(String driveType, int slot) {
+        switch (driveType) {
+            case "DF":
+                switch (slot) {
+                    case 0: return mDf0SourceName;
+                    case 1: return mDf1SourceName;
+                    case 2: return mDf2SourceName;
+                    case 3: return mDf3SourceName;
+                }
+                break;
+            case "DH":
+                switch (slot) {
+                    case 0: return mDh0SourceName;
+                    case 1: return mDh1SourceName;
+                    case 2: return mDh2SourceName;
+                    case 3: return mDh3SourceName;
+                    case 4: return mDh4SourceName;
+                }
+                break;
+            case "CD":
+                return mCd0SourceName;
+        }
+        return null;
+    }
+
+    /** Add a single drive icon + label to the drives strip. */
+    private void addDriveIcon(LinearLayout strip, int drawableResId, String label,
+            boolean enabled, boolean hasMedia, int iconSizePx, int marginStartPx,
+            View.OnClickListener onClick, View.OnLongClickListener onLongClick,
+            String mediaName) {
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setGravity(android.view.Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams cLp = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        if (marginStartPx > 0) cLp.setMargins(marginStartPx, 0, 0, 0);
+        container.setLayoutParams(cLp);
+
+        android.widget.FrameLayout iconWrap = new android.widget.FrameLayout(this);
+        LinearLayout.LayoutParams iconWrapLp = new LinearLayout.LayoutParams(iconSizePx, iconSizePx);
+        iconWrap.setLayoutParams(iconWrapLp);
+
+        android.widget.ImageView iv = new android.widget.ImageView(this);
+        iv.setImageResource(drawableResId);
+        iv.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
+        iv.setContentDescription(label);
+        iv.setAlpha(enabled ? (hasMedia ? 1.0f : 0.72f) : 0.35f);
+        android.widget.FrameLayout.LayoutParams ivLp = new android.widget.FrameLayout.LayoutParams(iconSizePx, iconSizePx);
+        iv.setLayoutParams(ivLp);
+
+        int[] attrs = new int[]{android.R.attr.selectableItemBackground};
+        android.content.res.TypedArray ta = obtainStyledAttributes(attrs);
+        android.graphics.drawable.Drawable ripple = ta.getDrawable(0);
+        ta.recycle();
+        if (ripple != null) iconWrap.setBackground(ripple);
+        iv.setClickable(false);
+        iv.setFocusable(false);
+        iconWrap.addView(iv);
+
+        TextView disabledOverlay = new TextView(this);
+        android.widget.FrameLayout.LayoutParams disabledLp = new android.widget.FrameLayout.LayoutParams(
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+            android.view.Gravity.CENTER);
+        disabledOverlay.setLayoutParams(disabledLp);
+        disabledOverlay.setText("✕");
+        disabledOverlay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        disabledOverlay.setTypeface(null, android.graphics.Typeface.BOLD);
+        disabledOverlay.setTextColor(0xCCFF5A5A);
+        disabledOverlay.setVisibility(enabled ? View.GONE : View.VISIBLE);
+        disabledOverlay.setClickable(false);
+        disabledOverlay.setFocusable(false);
+        iconWrap.addView(disabledOverlay);
+
+        if (onClick != null) iconWrap.setOnClickListener(onClick);
+        if (onLongClick != null) iconWrap.setOnLongClickListener(onLongClick);
+        iconWrap.setClickable(true);
+        iconWrap.setFocusable(true);
+        container.addView(iconWrap);
+
+        // Drive label
+        TextView tv = new TextView(this);
+        tv.setText(label);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 10);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setTypeface(null, android.graphics.Typeface.BOLD);
+        tv.setGravity(android.view.Gravity.CENTER);
+        container.addView(tv);
+
+        // Media filename (below label)
+        TextView tvMedia = new TextView(this);
+        if (mediaName != null && !mediaName.trim().isEmpty()) {
+            tvMedia.setText(mediaName);
+        } else {
+            tvMedia.setText(enabled ? (hasMedia ? "(loaded)" : "(empty)") : "(disabled)");
+        }
+        tvMedia.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8);
+        tvMedia.setTextColor(!enabled ? 0x88FFFFFF : (hasMedia ? 0xCCFFFFFF : 0x88FFFFFF));
+        tvMedia.setGravity(android.view.Gravity.CENTER);
+        tvMedia.setMaxWidth(iconSizePx);
+        tvMedia.setMaxLines(1);
+        tvMedia.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        container.addView(tvMedia);
+
+        strip.addView(container);
+    }
+
+    /** Build the model RadioGroup as two columns: main models left, CD32/CDTV right. */
+    private void buildModelRadioGroup() {
+        android.widget.RadioGroup rg = findViewById(R.id.radioGroupModel);
+        if (rg == null) return;
+        rg.removeAllViews();
+        rg.setOrientation(LinearLayout.HORIZONTAL);
+
+        final float density = getResources().getDisplayMetrics().density;
+        int padPx = (int)(8 * density);
+        int minHeightPx = (int)(40 * density);
+
+        LinearLayout leftCol = new LinearLayout(this);
+        leftCol.setOrientation(LinearLayout.VERTICAL);
+        leftCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        LinearLayout rightCol = new LinearLayout(this);
+        rightCol.setOrientation(LinearLayout.VERTICAL);
+        rightCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
+
+        mModelRadioButtons = new android.widget.RadioButton[QS_MODELS.length];
+
+        for (int i = 0; i < QS_MODELS.length; i++) {
+            android.widget.RadioButton rb = new android.widget.RadioButton(this);
+            rb.setText(QS_MODELS[i].label);
+            rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            rb.setPadding(padPx, padPx, padPx, padPx);
+            rb.setMinHeight(minHeightPx);
+            rb.setMinimumHeight(minHeightPx);
+            rb.setId(View.generateViewId());
+            rb.setTag(i);
+            mModelRadioButtons[i] = rb;
+
+            final int idx = i;
+            rb.setOnClickListener(v -> selectModelRadio(idx));
+
+            // CD32 and CDTV (last 2) go to the right column
+            if (i >= QS_MODELS.length - 2) {
+                rightCol.addView(rb);
+            } else {
+                leftCol.addView(rb);
+            }
+        }
+
+        rg.addView(leftCol);
+        rg.addView(rightCol);
+    }
+
+    /** Select a model radio button, deselect all others, and sync spinner + image. */
+    private void selectModelRadio(int index) {
+        if (mModelRadioButtons == null) return;
+        for (int i = 0; i < mModelRadioButtons.length; i++) {
+            mModelRadioButtons[i].setChecked(i == index);
+        }
+        if (mQsModelSpinner != null) {
+            mQsModelSpinner.setSelection(index);
+        }
+        updateModelImage();
+        refreshStatus();
+    }
+
+    /** Sync the RadioGroup selection to match the spinner position. */
+    private void syncRadioToSpinner() {
+        if (mModelRadioButtons == null || mQsModelSpinner == null) return;
+        int idx = mQsModelSpinner.getSelectedItemPosition();
+        if (idx >= 0 && idx < mModelRadioButtons.length) {
+            for (int i = 0; i < mModelRadioButtons.length; i++) {
+                mModelRadioButtons[i].setChecked(i == idx);
+            }
+        }
+    }
+
+    /** Return the recommended Kickstart ROM version string for the given model. */
+    private String getRecommendedKickstartVersion(String modelId) {
+        if (modelId == null) return "1.3";
+        switch (modelId.toUpperCase()) {
+            case "A500":  return "1.3";
+            case "A500P": return "2.04";
+            case "A600":  return "2.05";
+            case "A1200": return "3.1";
+            case "A3000": return "2.04";
+            case "A4000": return "3.1";
+            case "CD32":  return "3.1+ext";
+            case "CDTV":  return "1.3";
+            default:      return "1.3";
+        }
+    }
+
+    /** Update the Amiga model image based on current selection. */
+    private void updateModelImage() {
+        android.widget.ImageView imgModel = findViewById(R.id.imgAmigaModel);
+        if (imgModel == null) return;
+        String baseModelId = getSelectedQsModelId();
+        int resId = resolveModelGraphicResId(baseModelId);
+        if (resId != 0) {
+            imgModel.setImageResource(resId);
+        }
+    }
+
+    private void onFloppySlotTapped(int slot) {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model does not use floppy drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if (slot == 1 && !mDf1Added) {
+            mDf1Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, true).apply();
+            refreshStatus();
+        }
+
+        boolean hasMedia = false;
+        if (slot == 0) hasMedia = hasDf0();
+        else if (slot == 1) hasMedia = hasDf1();
+        else if (slot == 2) hasMedia = hasDf2();
+        else if (slot == 3) hasMedia = hasDf3();
+
+        if (hasMedia) {
+            clearDfMediaSlot(slot);
+            return;
+        }
+
+        if (slot == 0) {
+            pickDisk(REQ_IMPORT_DF0);
+            return;
+        }
+
+        SharedPreferences.Editor edit = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        if (slot == 1) {
+            mDf1Added = true;
+            edit.putBoolean(PREF_SHOW_DF1, true).apply();
+            refreshStatus();
+            pickDisk(REQ_IMPORT_DF1);
+            return;
+        }
+        if (slot == 2) {
+            mDf2Added = true;
+            edit.putBoolean(PREF_SHOW_DF2, true).apply();
+            refreshStatus();
+            pickDisk(REQ_IMPORT_DF2);
+            return;
+        }
+        if (slot == 3) {
+            mDf3Added = true;
+            edit.putBoolean(PREF_SHOW_DF3, true).apply();
+            refreshStatus();
+            pickDisk(REQ_IMPORT_DF3);
+        }
+    }
+
+    private void clearDfMediaSlot(int slot) {
+        SharedPreferences.Editor prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+        if (slot == 0) {
+            clearByPrefix(getInternalDisksDir(), "df0");
+            try {
+                clearFile(new File(getInternalDisksDir(), "disk.zip"));
+            } catch (Throwable ignored) {
+            }
+            mSelectedDf0 = null;
+            mSelectedDf0Path = null;
+            mDf0SourceName = null;
+            prefs.remove(UaeOptionKeys.UAE_DRIVE_DF0_PATH);
+        } else if (slot == 1) {
+            clearByPrefix(getInternalDisksDir(), "df1");
+            mSelectedDf1 = null;
+            mSelectedDf1Path = null;
+            mDf1SourceName = null;
+            prefs.remove(UaeOptionKeys.UAE_DRIVE_DF1_PATH);
+        } else if (slot == 2) {
+            clearByPrefix(getInternalDisksDir(), "df2");
+            mSelectedDf2 = null;
+            mSelectedDf2Path = null;
+            mDf2SourceName = null;
+            prefs.remove(UaeOptionKeys.UAE_DRIVE_DF2_PATH);
+        } else if (slot == 3) {
+            clearByPrefix(getInternalDisksDir(), "df3");
+            mSelectedDf3 = null;
+            mSelectedDf3Path = null;
+            mDf3SourceName = null;
+            prefs.remove(UaeOptionKeys.UAE_DRIVE_DF3_PATH);
+        }
+        prefs.apply();
+        saveSourceNames();
+        refreshStatus();
+    }
+
+    private void addNextFloppySlotAndPick() {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model does not use floppy drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDf1Added) {
+            onFloppySlotTapped(1);
+            return;
+        }
+        if (!mDf2Added) {
+            onFloppySlotTapped(2);
+            return;
+        }
+        if (!mDf3Added) {
+            onFloppySlotTapped(3);
+            return;
+        }
+        Toast.makeText(this, "All floppy drives are already added.", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Add a floppy drive slot without immediately opening a file picker. */
+    private void addNextEmptyFloppySlot() {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model does not use floppy drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        SharedPreferences.Editor ed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        if (!mDf1Added) {
+            mDf1Added = true;
+            ed.putBoolean(PREF_SHOW_DF1, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DF1 added — tap the drive image to insert a disk.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDf2Added) {
+            mDf2Added = true;
+            ed.putBoolean(PREF_SHOW_DF2, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DF2 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDf3Added) {
+            mDf3Added = true;
+            ed.putBoolean(PREF_SHOW_DF3, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DF3 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "All floppy drives are already added.", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Add a hard drive slot without immediately opening a file picker. */
+    private void addNextEmptyHdSlot() {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model doesn't use hard drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        SharedPreferences.Editor ed = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        if (!mDh0Added) {
+            mDh0Added = true;
+            ed.putBoolean(PREF_SHOW_DH0, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DH0 added — tap the drive image to choose HDF/folder.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDh1Added) {
+            mDh1Added = true;
+            ed.putBoolean(PREF_SHOW_DH1, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DH1 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDh2Added) {
+            mDh2Added = true;
+            ed.putBoolean(PREF_SHOW_DH2, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DH2 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDh3Added) {
+            mDh3Added = true;
+            ed.putBoolean(PREF_SHOW_DH3, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DH3 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (!mDh4Added) {
+            mDh4Added = true;
+            ed.putBoolean(PREF_SHOW_DH4, true).apply();
+            refreshStatus();
+            Toast.makeText(this, "DH4 added.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(this, "All hard drive slots are already in use.", Toast.LENGTH_SHORT).show();
+    }
+
+    private void removeLastFloppyDrive() {
+        if (isCdOnlyModel()) {
+            Toast.makeText(this, "This model does not use floppy drives.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        SharedPreferences.Editor launchPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        if (mDf3Added) {
+            clearDfMediaSlot(3);
+            mDf3Added = false;
+            launchPrefs.putBoolean(PREF_SHOW_DF3, false).apply();
+            refreshStatus();
+            return;
+        }
+        if (mDf2Added) {
+            clearDfMediaSlot(2);
+            mDf2Added = false;
+            launchPrefs.putBoolean(PREF_SHOW_DF2, false).apply();
+            refreshStatus();
+            return;
+        }
+        if (mDf1Added) {
+            clearDfMediaSlot(1);
+            mDf1Added = false;
+            launchPrefs.putBoolean(PREF_SHOW_DF1, false).apply();
+            refreshStatus();
+            return;
+        }
+        Toast.makeText(this, "DF0 is fixed; no extra floppy drive to remove.", Toast.LENGTH_SHORT).show();
+    }
+
+    /** Long-press handler: ask user to remove the external floppy drive(s). */
+    private void promptRemoveExternalDrive() {
+        List<String> names = new ArrayList<>();
+        List<Integer> indices = new ArrayList<>();
+        if (mDf1Added) { names.add("DF1"); indices.add(1); }
+        if (mDf2Added) { names.add("DF2"); indices.add(2); }
+        if (mDf3Added) { names.add("DF3"); indices.add(3); }
+        if (names.isEmpty()) {
+            Toast.makeText(this, "No external floppy drives to remove.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CharSequence[] items = names.toArray(new CharSequence[0]);
+        new AlertDialog.Builder(this)
+            .setTitle("Remove floppy drive")
+            .setItems(items, (d, which) -> {
+                if (which >= 0 && which < indices.size()) {
+                    removeDfCompletelyFromUaePrefs(indices.get(which));
+                    refreshStatus();
+                }
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    /** Long-press handler: ask user to remove a hard drive. */
+    private void promptRemoveHardDrive() {
+        List<String> names = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        if (mDh0Added || hasDh0()) {
+            names.add("DH0");
+            actions.add(() -> { clearDh0FromUaePrefs(); refreshStatus(); });
+        }
+        if (mDh1Added || hasDh1()) {
+            names.add("DH1");
+            actions.add(() -> { removeDh1CompletelyFromUaePrefs(); refreshStatus(); });
+        }
+        if (mDh2Added) {
+            names.add("DH2");
+            actions.add(() -> { removeDhCompletelyFromUaePrefs(2); refreshStatus(); });
+        }
+        if (mDh3Added) {
+            names.add("DH3");
+            actions.add(() -> { removeDhCompletelyFromUaePrefs(3); refreshStatus(); });
+        }
+        if (mDh4Added) {
+            names.add("DH4");
+            actions.add(() -> { removeDhCompletelyFromUaePrefs(4); refreshStatus(); });
+        }
+        if (names.isEmpty()) {
+            Toast.makeText(this, "No hard drives to remove.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        CharSequence[] items = names.toArray(new CharSequence[0]);
+        new AlertDialog.Builder(this)
+            .setTitle("Remove hard drive")
+            .setItems(items, (d, which) -> {
+                if (which >= 0 && which < actions.size()) {
+                    actions.get(which).run();
+                }
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    private void showAmigaConfigDialog() {
+        final String[] items = new String[]{"CPU/FPU", "Chipset", "RAM", "Sound", "Input"};
+        new AlertDialog.Builder(this)
+            .setTitle("Amiga Configuration")
+            .setItems(items, (d, which) -> {
+                try {
+                    if (which == 0) startActivity(new Intent(this, CpuFpuOptionsActivity.class));
+                    else if (which == 1) startActivity(new Intent(this, ChipsetOptionsActivity.class));
+                    else if (which == 2) startActivity(new Intent(this, MemoryOptionsActivity.class));
+                    else if (which == 3) startActivity(new Intent(this, SoundOptionsActivity.class));
+                    else if (which == 4) startActivity(new Intent(this, InputOptionsActivity.class));
+                } catch (Throwable ignored) {
+                }
+            })
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
     private boolean hasCd0() {
         String cdPath = (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty())
             ? mSelectedCd0Path
@@ -5207,11 +6353,15 @@ public class BootstrapActivity extends Activity {
         String dh0Mode = getDh0Mode();
         String baseModelId = getSelectedQsModelId();
 
+        updateSelectedDevicePanel(baseModelId, cdOnly);
+        updateFloppyGraphicPanel(cdOnly);
+
         if (mKickStatus != null) {
+            String romVer = getRecommendedKickstartVersion(baseModelId);
             if (mSelectedKick != null && mSelectedKick.exists() && mSelectedKick.length() > 0) {
-                mKickStatus.setText(labelWithSource("Kickstart", mSelectedKick, mKickSourceName));
+                mKickStatus.setText(labelWithSource("KS " + romVer, mSelectedKick, mKickSourceName));
             } else {
-                mKickStatus.setText("Kickstart: (not selected) - will use AROS");
+                mKickStatus.setText("KS " + romVer + ": (not set) \u2014 will use AROS");
             }
         }
 
@@ -5253,9 +6403,8 @@ public class BootstrapActivity extends Activity {
         }
 
         boolean showDf1Controls = !cdOnly && mDf1Added;
-        if (mBtnAddDf1 != null) {
-            mBtnAddDf1.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
-        }
+        // Show "+DF" button when not in CD-only mode (always available to add drives)
+        if (mBtnAddDf1 != null) mBtnAddDf1.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
         if (mDf1Controls != null) {
             mDf1Controls.setVisibility(showDf1Controls ? View.VISIBLE : View.GONE);
         }
@@ -5318,10 +6467,10 @@ public class BootstrapActivity extends Activity {
         View btnClearDf0 = findViewById(R.id.btnClearDf0);
         View btnPickDf1 = findViewById(R.id.btnPickDf1);
         View btnClearDf1 = findViewById(R.id.btnClearDf1);
-        if (btnPickDf0 != null) btnPickDf0.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
-        if (btnClearDf0 != null) btnClearDf0.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
-        if (btnPickDf1 != null) btnPickDf1.setVisibility(showDf1Controls ? View.VISIBLE : View.GONE);
-        if (btnClearDf1 != null) btnClearDf1.setVisibility(showDf1Controls ? View.VISIBLE : View.GONE);
+        if (btnPickDf0 != null) btnPickDf0.setVisibility(View.GONE);
+        if (btnClearDf0 != null) btnClearDf0.setVisibility(View.GONE);
+        if (btnPickDf1 != null) btnPickDf1.setVisibility(View.GONE);
+        if (btnClearDf1 != null) btnClearDf1.setVisibility(View.GONE);
 
         boolean showCd0 = cdOnly || mCd0Added;
         // "+ CD" is now an entry point to the storage modal (always available).
@@ -5332,6 +6481,96 @@ public class BootstrapActivity extends Activity {
         // Do not re-sync boot media from the launcher UI, or we can overwrite runtime swaps.
         if (!mLaunchedFromEmulatorMenu) {
             syncBootMediumToUaePrefs();
+        }
+    }
+
+    private int resolveModelGraphicResId(String modelId) {
+        String key = "featured_default";
+        if (modelId != null) {
+            String m = modelId.trim().toUpperCase(Locale.ROOT);
+            if (m.contains("A500") || m.contains("A600") || m.contains("A1000")) {
+                key = "featured_a500";
+            } else if (m.contains("A1200") || m.contains("A3000") || m.contains("A4000")) {
+                key = "featured_a1200";
+            } else if ("CD32".equals(m) || "CDTV".equals(m)) {
+                key = "featured_cd32";
+            }
+        }
+
+        int id = getResources().getIdentifier(key, "drawable", getPackageName());
+        if (id == 0) {
+            id = getResources().getIdentifier("featured_default", "drawable", getPackageName());
+        }
+        return id;
+    }
+
+    private String labelOrPath(String sourceName, File file, String path, String empty) {
+        if (sourceName != null && !sourceName.trim().isEmpty()) return sourceName.trim();
+        if (file != null) return file.getName();
+        if (path != null && !path.trim().isEmpty()) return path.trim();
+        return empty;
+    }
+
+    private void updateSelectedDevicePanel(String baseModelId, boolean cdOnly) {
+        TextView deviceTitle = findViewById(R.id.txtSelectedDeviceTitle);
+        TextView deviceTree = findViewById(R.id.txtStatusSummary);
+
+        String modelLabel = "Amiga";
+        QsModel selected = getSelectedQsModel();
+        if (selected != null && selected.label != null && !selected.label.trim().isEmpty()) {
+            modelLabel = selected.label.trim();
+        } else if (baseModelId != null && !baseModelId.trim().isEmpty()) {
+            modelLabel = baseModelId.trim();
+        }
+
+        if (deviceTitle != null) {
+            deviceTitle.setText("Main device: " + modelLabel);
+        }
+        // Update the model image and radio selection
+        updateModelImage();
+        syncRadioToSpinner();
+
+        if (deviceTree != null) {
+            // Build compact single-line status summary visible without scrolling.
+            StringBuilder sb = new StringBuilder();
+            if (cdOnly) {
+                sb.append("CD: ").append(hasCd0()
+                    ? labelOrPath(mCd0SourceName, mSelectedCd0, mSelectedCd0Path, "?")
+                    : "none");
+            } else {
+                // DF0 / DF1
+                sb.append("DF0: ").append(hasDf0()
+                    ? labelOrPath(mDf0SourceName, mSelectedDf0, mSelectedDf0Path, "?")
+                    : "---");
+                if (hasDf1()) {
+                    sb.append("  DF1: ").append(labelOrPath(mDf1SourceName, mSelectedDf1, mSelectedDf1Path, "?"));
+                }
+                // DH0 / DH1
+                if (hasDh0()) {
+                    sb.append("  DH0: ");
+                    if (DH0_MODE_DIR.equals(getDh0Mode())) {
+                        sb.append(labelOrPath(mDh0SourceName, null,
+                            mSelectedDh0Dir != null ? mSelectedDh0Dir.getAbsolutePath() : null, "?"));
+                    } else {
+                        sb.append(labelOrPath(mDh0SourceName, mSelectedDh0Hdf, mSelectedDh0HdfPath, "?"));
+                    }
+                }
+                if (hasDh1()) {
+                    sb.append("  DH1: ");
+                    if (DH1_MODE_DIR.equals(getDh1Mode())) {
+                        sb.append(labelOrPath(mDh1SourceName, null,
+                            mSelectedDh1Dir != null ? mSelectedDh1Dir.getAbsolutePath() : null, "?"));
+                    } else {
+                        sb.append(labelOrPath(mDh1SourceName, mSelectedDh1Hdf, mSelectedDh1HdfPath, "?"));
+                    }
+                }
+                // CD
+                if (hasCd0()) {
+                    sb.append("  CD: ").append(labelOrPath(mCd0SourceName, mSelectedCd0, mSelectedCd0Path, "?"));
+                }
+                if (sb.length() == 0) sb.append("No media connected");
+            }
+            deviceTree.setText(sb.toString());
         }
     }
 
@@ -5359,9 +6598,17 @@ public class BootstrapActivity extends Activity {
         // Check if first-time walkthrough should be shown
         if (!mLaunchedFromEmulatorMenu && savedInstanceState == null) {
             SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            if (!prefs.getBoolean(PREF_WALKTHROUGH_COMPLETED, false)) {
-                // Launch walkthrough for first-time users
-                startActivity(new Intent(this, WalkthroughActivity.class));
+            boolean forceWalkthrough = prefs.getBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, false);
+            boolean shouldShowWalkthrough = forceWalkthrough || WalkthroughActivity.shouldShowWalkthrough(this);
+            if (shouldShowWalkthrough) {
+                if (forceWalkthrough) {
+                    prefs.edit().putBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, false).apply();
+                }
+                Intent walkthrough = new Intent(this, WalkthroughActivity.class);
+                if (forceWalkthrough) {
+                    walkthrough.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
+                }
+                startActivity(walkthrough);
                 finish();
                 return;
             }
@@ -5577,18 +6824,30 @@ public class BootstrapActivity extends Activity {
             });
         }
 
-        // Quick access buttons in the Model panel.
-        Button btnModelCpuFpu = findViewById(R.id.btnModelCpuFpu);
-        if (btnModelCpuFpu != null) btnModelCpuFpu.setOnClickListener(v -> startActivity(new Intent(this, CpuFpuOptionsActivity.class)));
+        Button btnClearCache = findViewById(R.id.btnClearCache);
+        if (btnClearCache != null) {
+            btnClearCache.setOnClickListener(v -> {
+                new AlertDialog.Builder(this)
+                    .setTitle("Clear cache")
+                    .setMessage("This clears mounted media selections and launcher cache for a clean start. Imported files stay on disk.")
+                    .setPositiveButton("Clear", (d, w) -> {
+                        clearConnectedMediaForColdLauncherStart();
+                        syncMediaSelectionsFromUaePrefs();
+                        reconcileLauncherMediaVisibilityWithUaePrefs();
+                        refreshStatus();
+                        Toast.makeText(this, "Cache cleared", Toast.LENGTH_SHORT).show();
+                    })
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            });
+        }
 
+        // Quick access buttons in the Model panel.
         Button btnModelChipset = findViewById(R.id.btnModelChipset);
         if (btnModelChipset != null) btnModelChipset.setOnClickListener(v -> startActivity(new Intent(this, ChipsetOptionsActivity.class)));
 
         Button btnModelRam = findViewById(R.id.btnModelRam);
         if (btnModelRam != null) btnModelRam.setOnClickListener(v -> startActivity(new Intent(this, MemoryOptionsActivity.class)));
-
-        Button btnModelSound = findViewById(R.id.btnModelSound);
-        if (btnModelSound != null) btnModelSound.setOnClickListener(v -> startActivity(new Intent(this, SoundOptionsActivity.class)));
 
         Button btnModelInput = findViewById(R.id.btnModelInput);
         if (btnModelInput != null) btnModelInput.setOnClickListener(v -> startActivity(new Intent(this, InputOptionsActivity.class)));
@@ -5611,12 +6870,12 @@ public class BootstrapActivity extends Activity {
         mDh0Status = findViewById(R.id.txtDh0Status);
         mDh1Status = findViewById(R.id.txtDh1Status);
 
-        // The inline ADF/Clear buttons are intentionally hidden; use the DF popup instead.
+        // DF selection is driven from the external-drive graphic touch points.
         if (mDf0Status != null) {
-            mDf0Status.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_DF));
+            mDf0Status.setOnClickListener(v -> onFloppySlotTapped(0));
         }
         if (mDf1Status != null) {
-            mDf1Status.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_DF));
+            mDf1Status.setOnClickListener(v -> onFloppySlotTapped(1));
         }
 
         mDf1Controls = findViewById(R.id.df1Controls);
@@ -5657,11 +6916,14 @@ public class BootstrapActivity extends Activity {
 
         ArrayAdapter<String> modelAdapter = new ArrayAdapter<>(
             this,
-            android.R.layout.simple_spinner_item,
+            R.layout.spinner_item_compact,
             modelLabels
         );
-        modelAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        modelAdapter.setDropDownViewResource(R.layout.spinner_dropdown_compact);
         mQsModelSpinner.setAdapter(modelAdapter);
+
+        // Build the model radio buttons and set up the Amiga image
+        buildModelRadioGroup();
 
         SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         String prefsModelId = launcherPrefs.getString(PREF_QS_MODEL, "A500");
@@ -5733,6 +6995,8 @@ public class BootstrapActivity extends Activity {
         }
 
         mQsModelSpinner.setSelection(modelIdx);
+        syncRadioToSpinner();
+        updateModelImage();
         updateConfigSpinnerForModel(modelIdx, cfgIdx);
 
         if (modelIdx >= 0 && modelIdx < QS_MODELS.length) {
@@ -5869,9 +7133,13 @@ public class BootstrapActivity extends Activity {
         } else if (df0Sel.file != null) {
             mSelectedDf0 = df0Sel.file;
             mSelectedDf0Path = null;
-        }
-        if (mSelectedDf0 == null && mSelectedDf0Path == null) {
-            mSelectedDf0 = findDiskByPrefix("df0");
+        } else {
+            mSelectedDf0 = null;
+            mSelectedDf0Path = null;
+            if (mDf0SourceName != null && !mDf0SourceName.trim().isEmpty()) {
+                mDf0SourceName = null;
+                saveSourceNames();
+            }
         }
 
         BootstrapSelectionUtils.FileOrUri df1Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_DF1_PATH);
@@ -5976,15 +7244,76 @@ public class BootstrapActivity extends Activity {
         // Kickstart button is now in Model section, no hidden buttons to manage
 
         Button btnPickDf0 = findViewById(R.id.btnPickDf0);
-        btnPickDf0.setOnClickListener(v -> pickDisk(REQ_IMPORT_DF0));
+        if (btnPickDf0 != null) btnPickDf0.setOnClickListener(v -> onFloppySlotTapped(0));
 
         Button btnPickDf1 = findViewById(R.id.btnPickDf1);
-        btnPickDf1.setOnClickListener(v -> pickDisk(REQ_IMPORT_DF1));
+        if (btnPickDf1 != null) btnPickDf1.setOnClickListener(v -> onFloppySlotTapped(1));
 
-        if (mBtnAddDf1 != null) {
-            mBtnAddDf1.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_DF));
+        TextView dotDf1 = findViewById(R.id.dotDf1);
+        if (dotDf1 != null) dotDf1.setOnClickListener(v -> onFloppySlotTapped(1));
+
+        android.widget.ImageView selectedDeviceImage = findViewById(R.id.imgSelectedDevice);
+        // imgSelectedDevice is now a hidden stub
+
+        // Amiga model image: tap = config dialog, long-press = DF0 insert/eject
+        android.widget.ImageView imgAmigaModel = findViewById(R.id.imgAmigaModel);
+        if (imgAmigaModel != null) {
+            imgAmigaModel.setOnClickListener(v -> showAmigaConfigDialog());
+            imgAmigaModel.setOnLongClickListener(v -> {
+                onFloppySlotTapped(0);
+                return true;
+            });
         }
 
+        // DF0 status text: tap to insert/eject DF0
+        TextView df0StatusClick = findViewById(R.id.txtDf0Status);
+        if (df0StatusClick != null) {
+            df0StatusClick.setOnClickListener(v -> onFloppySlotTapped(0));
+        }
+        // DF1 status text tap target
+        TextView df1StatusClick = findViewById(R.id.txtDf1Status);
+        if (df1StatusClick != null) {
+            df1StatusClick.setOnClickListener(v -> onFloppySlotTapped(1));
+        }
+        android.widget.ImageView df0DriveImage = findViewById(R.id.imgDf0Drive);
+        if (df0DriveImage != null) {
+            df0DriveImage.setOnClickListener(v -> onFloppySlotTapped(0));
+        }
+        View iconBtnKick = findViewById(R.id.iconBtnKick);
+        if (iconBtnKick != null) {
+            iconBtnKick.setOnClickListener(v -> showKickstartMapDialog());
+        }
+        View btnAddLha = findViewById(R.id.btnAddLha);
+        if (btnAddLha != null) {
+            btnAddLha.setOnClickListener(v -> startActivity(new Intent(this, WHDBooterActivity.class)));
+        }
+
+        // External floppy image: single-click = insert disk, long-press = remove drive
+        android.widget.ImageView externalFloppyImage = findViewById(R.id.imgFloppyExternal);
+        if (externalFloppyImage != null) {
+            externalFloppyImage.setOnClickListener(v -> onFloppySlotTapped(1));
+            externalFloppyImage.setOnLongClickListener(v -> {
+                promptRemoveExternalDrive();
+                return true;
+            });
+        }
+
+        // Hard drive image: single-click = HD media options, long-press = remove
+        android.widget.ImageView hdImage = findViewById(R.id.imgHardDriveGraphic);
+        if (hdImage != null) {
+            hdImage.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_HD));
+            hdImage.setOnLongClickListener(v -> {
+                promptRemoveHardDrive();
+                return true;
+            });
+        }
+
+        // +DF button: add an empty floppy drive (user clicks the image to insert media)
+        if (mBtnAddDf1 != null) {
+            mBtnAddDf1.setOnClickListener(v -> addNextEmptyFloppySlot());
+        }
+
+        // +HD button: add an empty hard drive slot (user clicks the image to insert media)
         if (mBtnAddDh0 != null) {
             mBtnAddDh0.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_HD));
         }
@@ -6023,49 +7352,84 @@ public class BootstrapActivity extends Activity {
         });
 
         Button btnClearDf0 = findViewById(R.id.btnClearDf0);
-        btnClearDf0.setOnClickListener(v -> {
-            clearByPrefix(getInternalDisksDir(), "df0");
-            // DF0 swaps use a stable filename (disk.zip); clear it too.
-            try {
-                clearFile(new File(getInternalDisksDir(), "disk.zip"));
-            } catch (Throwable ignored) {
-            }
-            mSelectedDf0 = null;
-            mDf0SourceName = null;
-            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .remove(UaeOptionKeys.UAE_DRIVE_DF0_PATH)
-                .apply();
-            saveSourceNames();
-            refreshStatus();
-        });
+        if (btnClearDf0 != null) {
+            btnClearDf0.setOnClickListener(v -> {
+                clearByPrefix(getInternalDisksDir(), "df0");
+                // DF0 swaps use a stable filename (disk.zip); clear it too.
+                try {
+                    clearFile(new File(getInternalDisksDir(), "disk.zip"));
+                } catch (Throwable ignored) {
+                }
+                mSelectedDf0 = null;
+                mDf0SourceName = null;
+                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .remove(UaeOptionKeys.UAE_DRIVE_DF0_PATH)
+                    .apply();
+                saveSourceNames();
+                refreshStatus();
+            });
+        }
 
         Button btnClearDf1 = findViewById(R.id.btnClearDf1);
-        btnClearDf1.setOnClickListener(v -> {
-            clearByPrefix(getInternalDisksDir(), "df1");
-            mSelectedDf1 = null;
-            mSelectedDf1Path = null;
-            mDf1SourceName = null;
-            mDf1Added = false;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, false).apply();
-            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .remove(UaeOptionKeys.UAE_DRIVE_DF1_PATH)
-                .apply();
-            saveSourceNames();
-            refreshStatus();
-        });
+        if (btnClearDf1 != null) {
+            btnClearDf1.setOnClickListener(v -> {
+                clearByPrefix(getInternalDisksDir(), "df1");
+                mSelectedDf1 = null;
+                mSelectedDf1Path = null;
+                mDf1SourceName = null;
+                mDf1Added = false;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, false).apply();
+                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .remove(UaeOptionKeys.UAE_DRIVE_DF1_PATH)
+                    .apply();
+                saveSourceNames();
+                refreshStatus();
+            });
+        }
 
         // DF2/DF3 controls were removed from the simplified Quickstart UI.
 
         Button btnStart = findViewById(R.id.btnStart);
-        btnStart.setOnClickListener(v -> startEmulator());
+        if (btnStart != null) {
+            btnStart.setVisibility(View.GONE);
+        }
+
+        Button btnStartPanel = findViewById(R.id.btnStartPanel);
+        if (btnStartPanel != null) {
+            btnStartPanel.setOnClickListener(v -> startEmulator());
+        }
+
+        Button btnRestart = findViewById(R.id.btnRestart);
+        if (btnRestart != null) {
+            btnRestart.setOnClickListener(v -> {
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle("Restart")
+                    .setMessage("Eject all media and reset device to defaults?")
+                    .setPositiveButton("Restart", (d, w) -> performRestart())
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            });
+        }
+
+        Button btnColdReset = findViewById(R.id.btnColdReset);
+        if (btnColdReset != null) {
+            btnColdReset.setOnClickListener(v -> {
+                new android.app.AlertDialog.Builder(this)
+                    .setTitle("Cold Reset")
+                    .setMessage("Fully reset the system? Hardware setup and media will be kept.")
+                    .setPositiveButton("Cold Reset", (d, w) -> performColdReset())
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show();
+            });
+        }
 
         // Show on app opening if Paths parent folder isn't set (or SAF permission is missing).
         maybePromptForPathsParentFolder();
         maybePromptForRequiredMediaPaths();
 
-        // First-install: create uae4arm folder tree and request SAF permission.
+        // First-install: prompt for SAF permission to a user-selected folder.
         if (!mLaunchedFromEmulatorMenu && savedInstanceState == null) {
             maybeSetupFirstRunFolders();
         }
@@ -6667,11 +8031,19 @@ public class BootstrapActivity extends Activity {
             boolean dh2Configured = dhCfg.dh2Configured;
             boolean dh3Configured = dhCfg.dh3Configured;
             boolean dh4Configured = dhCfg.dh4Configured;
+            boolean dh0UiSelected = hasDh0();
 
             SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
 
             // If DH1 is configured, the hard-drive section must be visible.
             if ((dh1Configured || dh2Configured || dh3Configured || dh4Configured) && !mDh0Added) {
+                mDh0Added = true;
+                launcherPrefs.edit().putBoolean(PREF_SHOW_DH0, true).apply();
+            }
+
+            // If DH0 media is currently selected/readable in UI state, keep DH0 section enabled.
+            // This avoids a stale-visible-but-disabled state after cold restarts.
+            if (dh0UiSelected && !mDh0Added) {
                 mDh0Added = true;
                 launcherPrefs.edit().putBoolean(PREF_SHOW_DH0, true).apply();
             }
@@ -6690,7 +8062,7 @@ public class BootstrapActivity extends Activity {
             }
 
             // If the UI says "added" but there is no configured media at all, hide it.
-            if (mDh0Added && !dh0Configured && !dh1Configured && !dh2Configured && !dh3Configured && !dh4Configured) {
+            if (mDh0Added && !dh0Configured && !dh1Configured && !dh2Configured && !dh3Configured && !dh4Configured && !dh0UiSelected) {
                 mDh0Added = false;
                 launcherPrefs.edit().putBoolean(PREF_SHOW_DH0, false).apply();
             }
@@ -6721,7 +8093,6 @@ public class BootstrapActivity extends Activity {
         BootstrapSelectionUtils.FileOrUri df0Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_DF0_PATH);
         File newDf0 = df0Sel.file;
         String newDf0Path = df0Sel.uri;
-        if (newDf0 == null && newDf0Path == null) newDf0 = findDiskByPrefix("df0");
 
         BootstrapSelectionUtils.FileOrUri df1Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_DF1_PATH);
         File newDf1 = df1Sel.file;
@@ -6996,6 +8367,501 @@ public class BootstrapActivity extends Activity {
             .show();
     }
 
+    private boolean handleDhDirImportResult(int requestCode, Uri uri) {
+        final int dhIndex;
+        if (requestCode == REQ_IMPORT_DH0_DIR) {
+            dhIndex = 0;
+        } else if (requestCode == REQ_IMPORT_DH1_DIR) {
+            dhIndex = 1;
+        } else if (requestCode == REQ_IMPORT_DH2_DIR) {
+            dhIndex = 2;
+        } else if (requestCode == REQ_IMPORT_DH3_DIR) {
+            dhIndex = 3;
+        } else if (requestCode == REQ_IMPORT_DH4_DIR) {
+            dhIndex = 4;
+        } else {
+            return false;
+        }
+
+        if (uri == null) return true;
+
+        DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
+        if (tree == null || !tree.isDirectory()) {
+            Toast.makeText(this, "Invalid DH" + dhIndex + " folder", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        File destDir;
+        switch (dhIndex) {
+            case 0:
+                destDir = getInternalDh0Dir();
+                break;
+            case 1:
+                destDir = getInternalDh1Dir();
+                break;
+            case 2:
+                destDir = getInternalDh2Dir();
+                break;
+            case 3:
+                destDir = getInternalDh3Dir();
+                break;
+            case 4:
+                destDir = getInternalDh4Dir();
+                break;
+            default:
+                return true;
+        }
+
+        deleteRecursive(destDir);
+        ensureDir(destDir);
+
+        if (!copyDocumentTreeTo(tree, destDir, 8)) {
+            Toast.makeText(this, "Failed to import DH" + dhIndex + " folder", Toast.LENGTH_LONG).show();
+            return true;
+        }
+
+        String srcName = tree.getName();
+        String source = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
+
+        SharedPreferences.Editor launcher = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+        switch (dhIndex) {
+            case 0:
+                mSelectedDh0Dir = destDir;
+                mSelectedDh0Hdf = null;
+                mSelectedDh0HdfPath = null;
+                mDh0SourceName = source;
+                mDh0Added = true;
+                launcher.putBoolean(PREF_SHOW_DH0, true);
+                launcher.putString(PREF_DH0_MODE, DH0_MODE_DIR);
+                break;
+            case 1:
+                mSelectedDh1Dir = destDir;
+                mSelectedDh1Hdf = null;
+                mSelectedDh1HdfPath = null;
+                mDh1SourceName = source;
+                mDh1Added = true;
+                launcher.putBoolean(PREF_SHOW_DH1, true);
+                launcher.putString(PREF_DH1_MODE, DH1_MODE_DIR);
+                break;
+            case 2:
+                mSelectedDh2Dir = destDir;
+                mSelectedDh2Hdf = null;
+                mSelectedDh2HdfPath = null;
+                mDh2SourceName = source;
+                mDh2Added = true;
+                launcher.putBoolean(PREF_SHOW_DH2, true);
+                break;
+            case 3:
+                mSelectedDh3Dir = destDir;
+                mSelectedDh3Hdf = null;
+                mSelectedDh3HdfPath = null;
+                mDh3SourceName = source;
+                mDh3Added = true;
+                launcher.putBoolean(PREF_SHOW_DH3, true);
+                break;
+            case 4:
+                mSelectedDh4Dir = destDir;
+                mSelectedDh4Hdf = null;
+                mSelectedDh4HdfPath = null;
+                mDh4SourceName = source;
+                mDh4Added = true;
+                launcher.putBoolean(PREF_SHOW_DH4, true);
+                break;
+        }
+        launcher.apply();
+
+        SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+        String vol = getDhVolumeName(dhIndex);
+        if (dhIndex == 0) {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI, 10);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_READONLY, false);
+        } else if (dhIndex == 1) {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_READONLY, false);
+        } else if (dhIndex == 2) {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_READONLY, false);
+        } else if (dhIndex == 3) {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_READONLY, false);
+        } else {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_READONLY, false);
+        }
+        e.apply();
+
+        saveSourceNames();
+        refreshStatus();
+        maybeReopenMediaSwapperAfterPicker();
+        return true;
+    }
+
+    private boolean handleDhHdfImportResult(int requestCode, Intent data, Uri uri) {
+        final int dhIndex;
+        if (requestCode == REQ_IMPORT_DH0_HDF) {
+            dhIndex = 0;
+        } else if (requestCode == REQ_IMPORT_DH1_HDF) {
+            dhIndex = 1;
+        } else if (requestCode == REQ_IMPORT_DH2_HDF) {
+            dhIndex = 2;
+        } else if (requestCode == REQ_IMPORT_DH3_HDF) {
+            dhIndex = 3;
+        } else if (requestCode == REQ_IMPORT_DH4_HDF) {
+            dhIndex = 4;
+        } else {
+            return false;
+        }
+
+        if (uri == null) return true;
+        String name = getDisplayName(uri);
+        if (!isValidHdfExtension(name)) {
+            Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
+            return true;
+        }
+        try {
+            takeReadPermissionIfPossible(uri, data.getFlags());
+        } catch (Throwable ignored) {
+        }
+        boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
+        importDhHdfAsync(dhIndex, uri, hasWrite);
+        return true;
+    }
+
+    private int dfIndexForRequestCode(int requestCode) {
+        if (requestCode == REQ_IMPORT_DF0) return 0;
+        if (requestCode == REQ_IMPORT_DF1) return 1;
+        if (requestCode == REQ_IMPORT_DF2) return 2;
+        if (requestCode == REQ_IMPORT_DF3) return 3;
+        return -1;
+    }
+
+    private String uaeDfPathKeyForIndex(int dfIndex) {
+        if (dfIndex == 0) return UaeOptionKeys.UAE_DRIVE_DF0_PATH;
+        if (dfIndex == 1) return UaeOptionKeys.UAE_DRIVE_DF1_PATH;
+        if (dfIndex == 2) return UaeOptionKeys.UAE_DRIVE_DF2_PATH;
+        if (dfIndex == 3) return UaeOptionKeys.UAE_DRIVE_DF3_PATH;
+        return null;
+    }
+
+    private String dfPickPrefixForIndex(int dfIndex) {
+        return "df" + dfIndex;
+    }
+
+    private void applyDfImportResult(int dfIndex, File dest, Uri uri, File disksDir) {
+        String src = getDisplayName(uri);
+        String sourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
+
+        if (dfIndex == 0) {
+            mSelectedDf0 = dest;
+            mSelectedDf0Path = null;
+            mDf0SourceName = sourceName;
+            try {
+                File legacyDf0 = new File(disksDir, "disk.zip");
+                if (!legacyDf0.equals(dest)) {
+                    clearFile(legacyDf0);
+                }
+            } catch (Throwable ignored) {
+            }
+        } else if (dfIndex == 1) {
+            mSelectedDf1 = dest;
+            mSelectedDf1Path = null;
+            mDf1SourceName = sourceName;
+            mDf1Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, true).apply();
+        } else if (dfIndex == 2) {
+            mSelectedDf2 = dest;
+            mSelectedDf2Path = null;
+            mDf2SourceName = sourceName;
+            mDf2Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF2, true).apply();
+        } else if (dfIndex == 3) {
+            mSelectedDf3 = dest;
+            mSelectedDf3Path = null;
+            mDf3SourceName = sourceName;
+            mDf3Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF3, true).apply();
+        }
+
+        String key = uaeDfPathKeyForIndex(dfIndex);
+        if (key != null) {
+            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(key, dest.getAbsolutePath())
+                .commit();
+        }
+
+        saveSourceNames();
+        refreshStatus();
+        maybeReopenMediaSwapperAfterPicker();
+    }
+
+    private boolean handleDfImportResult(int requestCode, Uri uri, File disksDir) {
+        int dfIndex = dfIndexForRequestCode(requestCode);
+        if (dfIndex < 0) return false;
+        if (uri == null) return true;
+
+        String displayName = getDisplayName(uri);
+        if (validateAndRejectIfWrongExtension(uri, displayName, new String[]{"adf", "zip"},
+            "Please select an Amiga floppy disk image (.adf or .zip)")) {
+            return true;
+        }
+
+        File dest = guessDestFileForUri(uri, disksDir, dfPickPrefixForIndex(dfIndex));
+        LogUtil.i(TAG, "Importing DF" + dfIndex + " from URI: " + uri + " -> " + dest.getAbsolutePath());
+        if (importToFile(uri, dest)) {
+            LogUtil.i(TAG, "Imported DF" + dfIndex + " to: " + dest.getAbsolutePath());
+            applyDfImportResult(dfIndex, dest, uri, disksDir);
+        } else {
+            Toast.makeText(this, "DF" + dfIndex + " import failed", Toast.LENGTH_SHORT).show();
+        }
+        return true;
+    }
+
+    private boolean handleCdMissingTracksFolderResult(int requestCode, int takeFlags, Uri uri) {
+        if (requestCode != REQ_IMPORT_CDIMAGE0_DIR) return false;
+        if (uri == null) return true;
+        if (mPendingCue == null || mPendingCueTracks == null || mPendingCueTracks.isEmpty()) {
+            Toast.makeText(this, "No pending CUE tracks to import", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        try {
+            takeReadPermissionIfPossible(uri, takeFlags);
+        } catch (Throwable ignored) {
+        }
+
+        DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
+        if (tree == null || !tree.isDirectory()) {
+            Toast.makeText(this, "Invalid folder selected", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        File cd0Dir = getInternalCd0Dir();
+        ensureDir(cd0Dir);
+
+        for (String trackName : mPendingCueTracks) {
+            if (trackName == null || trackName.trim().isEmpty()) continue;
+            File dest = new File(cd0Dir, trackName);
+            if (dest.exists() && dest.isFile() && dest.length() > 0) {
+                continue;
+            }
+            DocumentFile src = findFileByNameIgnoreCase(tree, trackName, 2);
+            if (src == null) {
+                Toast.makeText(this, "Missing track in selected folder: " + trackName, Toast.LENGTH_LONG).show();
+                return true;
+            }
+            if (!copyDocumentFileTo(src, dest)) {
+                Toast.makeText(this, "Failed to import track: " + trackName, Toast.LENGTH_LONG).show();
+                return true;
+            }
+        }
+
+        fixCueTrackFilenameCase(mPendingCue);
+        if (cueHasMissingTracks(mPendingCue)) {
+            Toast.makeText(this, "CUE still missing tracks after folder import", Toast.LENGTH_LONG).show();
+            return true;
+        }
+
+        mSelectedCd0 = mPendingCue;
+        if (mCd0SourceName == null || mCd0SourceName.trim().isEmpty()) {
+            mCd0SourceName = mPendingCue.getName();
+        }
+
+        mCd0Added = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
+
+        mPendingCue = null;
+        mPendingCueTracks = null;
+
+        SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+        e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, mSelectedCd0.getAbsolutePath());
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
+        e.apply();
+
+        saveSourceNames();
+        refreshStatus();
+        maybeReopenMediaSwapperAfterPicker();
+        return true;
+    }
+
+    private boolean handleCdImageImportResult(int requestCode, Intent data, int takeFlags, Uri uri) {
+        if (requestCode != REQ_IMPORT_CDIMAGE0) return false;
+
+        java.util.List<Uri> uris = new java.util.ArrayList<>();
+        java.util.List<Uri> validCdUris = new java.util.ArrayList<>();
+        java.util.Map<Uri, String> displayNameByUri = new java.util.HashMap<>();
+        if (data.getClipData() != null) {
+            android.content.ClipData cd = data.getClipData();
+            for (int i = 0; i < cd.getItemCount(); i++) {
+                Uri u = cd.getItemAt(i).getUri();
+                if (u != null) uris.add(u);
+            }
+        } else if (uri != null) {
+            uris.add(uri);
+        }
+
+        if (uris.isEmpty()) {
+            Toast.makeText(this, "No CD files selected", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        Uri bestUri = null;
+        String bestLabel = null;
+        int bestPri = 999;
+
+        for (Uri u : uris) {
+            if (u == null) continue;
+            takeReadPermissionIfPossible(u, takeFlags);
+            String displayName = getDisplayName(u);
+            if (displayName == null || displayName.trim().isEmpty()) displayName = "cd.bin";
+            if (!isValidCdExtension(displayName)) {
+                continue;
+            }
+            validCdUris.add(u);
+            displayNameByUri.put(u, displayName);
+            int pri = cdMainPriority(lowerExt(displayName));
+            if (pri < bestPri) {
+                bestPri = pri;
+                bestUri = u;
+                bestLabel = displayName;
+            }
+        }
+
+        if (bestUri == null) {
+            Toast.makeText(this, "Please select a CD image (.iso, .cue, .bin, or .chd)", Toast.LENGTH_LONG).show();
+            return true;
+        }
+
+        if ("cue".equals(lowerExt(bestLabel))) {
+            File cd0Dir = getInternalCd0Dir();
+            deleteRecursive(cd0Dir);
+            ensureDir(cd0Dir);
+
+            File cueDest = null;
+            String fallbackName = "cdimage0.cue";
+
+            for (Uri u : validCdUris) {
+                if (u == null) continue;
+                String name = displayNameByUri.get(u);
+                if (name == null || name.trim().isEmpty()) name = fallbackName;
+                File dest = new File(cd0Dir, safeFilename(name, fallbackName));
+                if (!importToFile(u, dest)) {
+                    continue;
+                }
+                if (u.equals(bestUri)) {
+                    cueDest = dest;
+                }
+            }
+
+            if (cueDest == null || !cueDest.exists() || cueDest.length() <= 0) {
+                Toast.makeText(this, "Failed to import selected CUE", Toast.LENGTH_LONG).show();
+                return true;
+            }
+
+            fixCueTrackFilenameCase(cueDest);
+            if (cueHasMissingTracks(cueDest)) {
+                java.util.List<String> tracks = parseCueTrackFilenames(cueDest);
+                if (tracks != null && !tracks.isEmpty()) {
+                    if (tryImportMissingCueTracksFromConfiguredCdroms(cueDest, tracks)) {
+                        mPendingCue = null;
+                        mPendingCueTracks = null;
+                        mSelectedCd0 = cueDest;
+                        mSelectedCd0Path = null;
+                        mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? cueDest.getName() : bestLabel;
+
+                        mCd0Added = true;
+                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
+
+                        SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+                        e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cueDest.getAbsolutePath());
+                        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
+                        e.apply();
+
+                        saveSourceNames();
+                        refreshStatus();
+                        maybeReopenMediaSwapperAfterPicker();
+                        return true;
+                    }
+
+                    mPendingCue = cueDest;
+                    mPendingCueTracks = tracks;
+                    mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? cueDest.getName() : bestLabel;
+                    Toast.makeText(this, "CUE needs BIN tracks — please select the folder containing them", Toast.LENGTH_LONG).show();
+                    pickCdFolderForMissingTracks();
+                    return true;
+                }
+                Log.w(TAG, "CUE selected without imported BIN tracks; no track names found in CUE");
+            }
+
+            mPendingCue = null;
+            mPendingCueTracks = null;
+            mSelectedCd0 = cueDest;
+            mSelectedCd0Path = null;
+            mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? cueDest.getName() : bestLabel;
+
+            mCd0Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
+
+            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+            e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cueDest.getAbsolutePath());
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
+            e.apply();
+
+            saveSourceNames();
+            refreshStatus();
+            maybeReopenMediaSwapperAfterPicker();
+            return true;
+        }
+
+        String bestUriString = bestUri.toString();
+        if (!isReadableMediaPath(bestUriString)) {
+            Toast.makeText(this, "Cannot read selected CD image", Toast.LENGTH_SHORT).show();
+            return true;
+        }
+
+        mSelectedCd0 = null;
+        mSelectedCd0Path = bestUriString;
+        mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? bestUriString : bestLabel;
+
+        mCd0Added = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
+
+        SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
+        e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, bestUriString);
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
+        e.apply();
+
+        saveSourceNames();
+        refreshStatus();
+        maybeReopenMediaSwapperAfterPicker();
+        return true;
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
@@ -7047,25 +8913,7 @@ public class BootstrapActivity extends Activity {
                     ed.putString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, joinSafTreeBase(treeUriStr, "savestates"));
                     ed.apply();
 
-                    // Create standard subfolders in the tree via DocumentFile so they're
-                    // immediately visible to SAF path checks. Using File.mkdirs() alone is
-                    // unreliable — DocumentFile.findFile() may not see filesystem-created
-                    // folders on many Android versions (they only appear after a media-scan).
-                    try {
-                        DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-                        if (tree != null) {
-                            String[] subs = {"kickstarts", "disks", "harddrives", "conf", "configs", "cdroms", "savestates", "whdboot", "lha"};
-                            for (String sub : subs) {
-                                DocumentFile existing = tree.findFile(sub);
-                                if (existing == null || !existing.exists()) {
-                                    tree.createDirectory(sub);
-                                }
-                            }
-                        }
-                    } catch (Throwable ignored) {
-                    }
-
-                    Toast.makeText(this, "Storage access granted – uae4arm folder is ready.", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(this, "Storage access granted.", Toast.LENGTH_SHORT).show();
                     mPathsParentPromptShown = true;
                     mRequiredPathsPromptShown = true;
                     getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -7098,184 +8946,15 @@ public class BootstrapActivity extends Activity {
             return;
         }
 
-        if (requestCode == REQ_IMPORT_CDIMAGE0_DIR) {
-            if (uri == null) return;
-            if (mPendingCue == null || mPendingCueTracks == null || mPendingCueTracks.isEmpty()) {
-                Toast.makeText(this, "No pending CUE tracks to import", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid folder selected", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File cd0Dir = getInternalCd0Dir();
-            ensureDir(cd0Dir);
-
-            for (String trackName : mPendingCueTracks) {
-                if (trackName == null || trackName.trim().isEmpty()) continue;
-                DocumentFile src = findFileByNameIgnoreCase(tree, trackName, 2);
-                if (src == null) {
-                    Toast.makeText(this, "Missing track in selected folder: " + trackName, Toast.LENGTH_LONG).show();
-                    return;
-                }
-                File dest = new File(cd0Dir, trackName);
-                if (!copyDocumentFileTo(src, dest)) {
-                    Toast.makeText(this, "Failed to import track: " + trackName, Toast.LENGTH_LONG).show();
-                    return;
-                }
-            }
-
-            fixCueTrackFilenameCase(mPendingCue);
-            if (cueHasMissingTracks(mPendingCue)) {
-                Toast.makeText(this, "CUE still missing tracks after folder import", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedCd0 = mPendingCue;
-            if (mCd0SourceName == null || mCd0SourceName.trim().isEmpty()) {
-                mCd0SourceName = mPendingCue.getName();
-            }
-
-            mCd0Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
-
-            mPendingCue = null;
-            mPendingCueTracks = null;
-
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, mSelectedCd0.getAbsolutePath());
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
+        if (handleCdMissingTracksFolderResult(requestCode, takeFlags, uri)) {
             return;
         }
 
-        if (requestCode == REQ_IMPORT_DH0_DIR) {
-            if (uri == null) return;
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid DH0 folder", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File destDir = getInternalDh0Dir();
-            deleteRecursive(destDir);
-            ensureDir(destDir);
-
-            if (!copyDocumentTreeTo(tree, destDir, 8)) {
-                Toast.makeText(this, "Failed to import DH0 folder", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedDh0Dir = destDir;
-            String srcName = tree.getName();
-            mDh0SourceName = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
-
-            mDh0Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DH0, true).apply();
-
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putString(PREF_DH0_MODE, DH0_MODE_DIR)
-                .apply();
-
-            // Apply into UAE prefs
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED, false);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED, true);
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_PATH, destDir.getAbsolutePath());
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME, "DH0");
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME, "DH0");
-            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI, 10);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR0_READONLY, false);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
+        if (handleDhDirImportResult(requestCode, uri)) {
             return;
         }
 
-        if (requestCode == REQ_IMPORT_DH0_HDF) {
-            if (uri == null) return;
-            String name = getDisplayName(uri);
-            if (!isValidHdfExtension(name)) {
-                Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                takeReadPermissionIfPossible(uri, data.getFlags());
-            } catch (Throwable ignored) {
-            }
-            boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
-            importDhHdfAsync(0, uri, hasWrite);
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH1_DIR) {
-            if (uri == null) return;
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid DH1 folder", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File destDir = getInternalDh1Dir();
-            deleteRecursive(destDir);
-            ensureDir(destDir);
-
-            if (!copyDocumentTreeTo(tree, destDir, 8)) {
-                Toast.makeText(this, "Failed to import DH1 folder", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedDh1Dir = destDir;
-            mSelectedDh1Hdf = null;
-            mSelectedDh1HdfPath = null;
-            String srcName = tree.getName();
-            mDh1SourceName = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
-
-            mDh1Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_SHOW_DH1, true)
-                .putString(PREF_DH1_MODE, DH1_MODE_DIR)
-                .apply();
-
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED, false);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED, true);
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_PATH, destDir.getAbsolutePath());
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME, "DH1");
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME, "DH1");
-            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI, -128);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR1_READONLY, false);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH1_HDF) {
-            if (uri == null) return;
-            String name = getDisplayName(uri);
-            if (!isValidHdfExtension(name)) {
-                Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                takeReadPermissionIfPossible(uri, data.getFlags());
-            } catch (Throwable ignored) {
-            }
-            boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
-            importDhHdfAsync(1, uri, hasWrite);
+        if (handleDhHdfImportResult(requestCode, data, uri)) {
             return;
         }
 
@@ -7360,459 +9039,14 @@ public class BootstrapActivity extends Activity {
             return;
         }
 
-        if (requestCode == REQ_IMPORT_CDIMAGE0) {
-            java.util.List<Uri> uris = new java.util.ArrayList<>();
-            java.util.List<Uri> validCdUris = new java.util.ArrayList<>();
-            java.util.Map<Uri, String> displayNameByUri = new java.util.HashMap<>();
-            if (data.getClipData() != null) {
-                android.content.ClipData cd = data.getClipData();
-                for (int i = 0; i < cd.getItemCount(); i++) {
-                    Uri u = cd.getItemAt(i).getUri();
-                    if (u != null) uris.add(u);
-                }
-            } else if (uri != null) {
-                uris.add(uri);
-            }
-
-            if (uris.isEmpty()) {
-                Toast.makeText(this, "No CD files selected", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            Uri bestUri = null;
-            String bestLabel = null;
-            int bestPri = 999;
-
-            for (Uri u : uris) {
-                if (u == null) continue;
-                takeReadPermissionIfPossible(u, takeFlags);
-                String displayName = getDisplayName(u);
-                if (displayName == null || displayName.trim().isEmpty()) displayName = "cd.bin";
-                if (!isValidCdExtension(displayName)) {
-                    continue;
-                }
-                validCdUris.add(u);
-                displayNameByUri.put(u, displayName);
-                int pri = cdMainPriority(lowerExt(displayName));
-                if (pri < bestPri) {
-                    bestPri = pri;
-                    bestUri = u;
-                    bestLabel = displayName;
-                }
-            }
-
-            if (bestUri == null) {
-                Toast.makeText(this, "Please select a CD image (.iso, .cue, .bin, or .chd)", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            if ("cue".equals(lowerExt(bestLabel))) {
-                File cd0Dir = getInternalCd0Dir();
-                deleteRecursive(cd0Dir);
-                ensureDir(cd0Dir);
-
-                File cueDest = null;
-                String fallbackName = "cdimage0.cue";
-
-                for (Uri u : validCdUris) {
-                    if (u == null) continue;
-                    String name = displayNameByUri.get(u);
-                    if (name == null || name.trim().isEmpty()) name = fallbackName;
-                    File dest = new File(cd0Dir, safeFilename(name, fallbackName));
-                    if (!importToFile(u, dest)) {
-                        continue;
-                    }
-                    if (u.equals(bestUri)) {
-                        cueDest = dest;
-                    }
-                }
-
-                if (cueDest == null || !cueDest.exists() || cueDest.length() <= 0) {
-                    Toast.makeText(this, "Failed to import selected CUE", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                fixCueTrackFilenameCase(cueDest);
-                if (cueHasMissingTracks(cueDest)) {
-                    java.util.List<String> tracks = parseCueTrackFilenames(cueDest);
-                    java.util.List<String> missing = new java.util.ArrayList<>();
-                    for (String track : tracks) {
-                        if (track == null || track.trim().isEmpty()) continue;
-                        if (!new File(cd0Dir, track).exists()) {
-                            missing.add(track);
-                        }
-                    }
-
-                    if (!missing.isEmpty()) {
-                        mPendingCue = cueDest;
-                        mPendingCueTracks = missing;
-                        mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? cueDest.getName() : bestLabel;
-                        Toast.makeText(this, "Select the folder containing the CUE/BIN tracks", Toast.LENGTH_LONG).show();
-                        pickCdFolderForMissingTracks();
-                        return;
-                    }
-
-                    Toast.makeText(this, "CUE import failed: missing BIN tracks", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                mPendingCue = null;
-                mPendingCueTracks = null;
-                mSelectedCd0 = cueDest;
-                mSelectedCd0Path = null;
-                mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? cueDest.getName() : bestLabel;
-
-                mCd0Added = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
-
-                SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-                e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cueDest.getAbsolutePath());
-                e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
-                e.apply();
-
-                saveSourceNames();
-                refreshStatus();
-                maybeReopenMediaSwapperAfterPicker();
-                return;
-            }
-
-            String bestUriString = bestUri.toString();
-            if (!isReadableMediaPath(bestUriString)) {
-                Toast.makeText(this, "Cannot read selected CD image", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            mSelectedCd0 = null;
-            mSelectedCd0Path = bestUriString;
-            mCd0SourceName = (bestLabel == null || bestLabel.trim().isEmpty()) ? bestUriString : bestLabel;
-
-            mCd0Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, true).apply();
-
-            // Ensure CD device is enabled for CD32/CDTV.
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, bestUriString);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
+        if (handleCdImageImportResult(requestCode, data, takeFlags, uri)) {
             return;
         }
 
         File disksDir = getInternalDisksDir();
         ensureDir(disksDir);
 
-        if (requestCode == REQ_IMPORT_DF0) {
-            if (uri == null) return;
-            // Validate extension: only .adf and .zip are accepted as floppy disk images.
-            String df0DisplayName = getDisplayName(uri);
-            if (validateAndRejectIfWrongExtension(uri, df0DisplayName, new String[]{"adf", "zip"},
-                "Please select an Amiga floppy disk image (.adf or .zip)")) return;
-            // Use the picked filename (prefixed for DF0) so saved configs preserve
-            // the actual media identity instead of a generic "disk.zip".
-            File dest = guessDestFileForUri(uri, disksDir, "df0");
-            LogUtil.i(TAG, "Importing DF0 from URI: " + uri + " -> " + dest.getAbsolutePath());
-            if (importToFile(uri, dest)) {
-                LogUtil.i(TAG, "Imported DF0 to: " + dest.getAbsolutePath() + " (len=" + dest.length() + " mtime=" + dest.lastModified() + ")");
-                // Keep prior DF0 imports so older saved configs still reference valid files.
-                try {
-                    File legacyDf0 = new File(disksDir, "disk.zip");
-                    if (!legacyDf0.equals(dest)) {
-                        clearFile(legacyDf0);
-                    }
-                } catch (Throwable ignored) {
-                }
-                mSelectedDf0 = dest;
-                mSelectedDf0Path = null;
-                String src = getDisplayName(uri);
-                mDf0SourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-                // Always commit synchronously so a subsequent Reset cannot read stale data.
-                //noinspection ResultOfMethodCallIgnored
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(UaeOptionKeys.UAE_DRIVE_DF0_PATH, dest.getAbsolutePath())
-                    .commit();
-                saveSourceNames();
-                refreshStatus();
-                maybeReopenMediaSwapperAfterPicker();
-            } else {
-                Toast.makeText(this, "DF0 import failed", Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-        if (requestCode == REQ_IMPORT_DF1) {
-            if (uri == null) return;
-            String df1DisplayName = getDisplayName(uri);
-            if (validateAndRejectIfWrongExtension(uri, df1DisplayName, new String[]{"adf", "zip"},
-                "Please select an Amiga floppy disk image (.adf or .zip)")) return;
-            File dest = guessDestFileForUri(uri, disksDir, "df1");
-            LogUtil.i(TAG, "Importing DF1 from URI: " + uri + " -> " + dest.getAbsolutePath());
-            if (importToFile(uri, dest)) {
-                LogUtil.i(TAG, "Imported DF1 to: " + dest.getAbsolutePath());
-                mSelectedDf1 = dest;
-                mSelectedDf1Path = null;
-                String src = getDisplayName(uri);
-                mDf1SourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-                mDf1Added = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, true).apply();
-                //noinspection ResultOfMethodCallIgnored
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(UaeOptionKeys.UAE_DRIVE_DF1_PATH, dest.getAbsolutePath())
-                    .commit();
-                saveSourceNames();
-                refreshStatus();
-                maybeReopenMediaSwapperAfterPicker();
-            } else {
-                Toast.makeText(this, "DF1 import failed", Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DF2) {
-            if (uri == null) return;
-            String df2DisplayName = getDisplayName(uri);
-            if (validateAndRejectIfWrongExtension(uri, df2DisplayName, new String[]{"adf", "zip"},
-                "Please select an Amiga floppy disk image (.adf or .zip)")) return;
-            File dest = guessDestFileForUri(uri, disksDir, "df2");
-            LogUtil.i(TAG, "Importing DF2 from URI: " + uri + " -> " + dest.getAbsolutePath());
-            if (importToFile(uri, dest)) {
-                LogUtil.i(TAG, "Imported DF2 to: " + dest.getAbsolutePath());
-                mSelectedDf2 = dest;
-                mSelectedDf2Path = null;
-                String src = getDisplayName(uri);
-                mDf2SourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-                mDf2Added = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF2, true).apply();
-
-                //noinspection ResultOfMethodCallIgnored
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(UaeOptionKeys.UAE_DRIVE_DF2_PATH, dest.getAbsolutePath())
-                    .commit();
-
-                saveSourceNames();
-                refreshStatus();
-                maybeReopenMediaSwapperAfterPicker();
-            } else {
-                Toast.makeText(this, "DF2 import failed", Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DF3) {
-            if (uri == null) return;
-            String df3DisplayName = getDisplayName(uri);
-            if (validateAndRejectIfWrongExtension(uri, df3DisplayName, new String[]{"adf", "zip"},
-                "Please select an Amiga floppy disk image (.adf or .zip)")) return;
-            File dest = guessDestFileForUri(uri, disksDir, "df3");
-            LogUtil.i(TAG, "Importing DF3 from URI: " + uri + " -> " + dest.getAbsolutePath());
-            if (importToFile(uri, dest)) {
-                LogUtil.i(TAG, "Imported DF3 to: " + dest.getAbsolutePath());
-                mSelectedDf3 = dest;
-                mSelectedDf3Path = null;
-                String src = getDisplayName(uri);
-                mDf3SourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-                mDf3Added = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF3, true).apply();
-
-                //noinspection ResultOfMethodCallIgnored
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putString(UaeOptionKeys.UAE_DRIVE_DF3_PATH, dest.getAbsolutePath())
-                    .commit();
-
-                saveSourceNames();
-                refreshStatus();
-                maybeReopenMediaSwapperAfterPicker();
-            } else {
-                Toast.makeText(this, "DF3 import failed", Toast.LENGTH_SHORT).show();
-            }
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH2_DIR) {
-            if (uri == null) return;
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid DH2 folder", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File destDir = getInternalDh2Dir();
-            deleteRecursive(destDir);
-            ensureDir(destDir);
-
-            if (!copyDocumentTreeTo(tree, destDir, 8)) {
-                Toast.makeText(this, "Failed to import DH2 folder", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedDh2Dir = destDir;
-            mSelectedDh2Hdf = null;
-            mSelectedDh2HdfPath = null;
-            String srcName = tree.getName();
-            mDh2SourceName = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
-
-            mDh2Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_SHOW_DH2, true)
-                .apply();
-
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED, false);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED, true);
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_PATH, destDir.getAbsolutePath());
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME, "DH2");
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME, "DH2");
-            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI, -128);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR2_READONLY, false);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH2_HDF) {
-            if (uri == null) return;
-            String name = getDisplayName(uri);
-            if (!isValidHdfExtension(name)) {
-                Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                takeReadPermissionIfPossible(uri, data.getFlags());
-            } catch (Throwable ignored) {
-            }
-            boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
-            importDhHdfAsync(2, uri, hasWrite);
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH3_DIR) {
-            if (uri == null) return;
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid DH3 folder", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File destDir = getInternalDh3Dir();
-            deleteRecursive(destDir);
-            ensureDir(destDir);
-
-            if (!copyDocumentTreeTo(tree, destDir, 8)) {
-                Toast.makeText(this, "Failed to import DH3 folder", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedDh3Dir = destDir;
-            mSelectedDh3Hdf = null;
-            mSelectedDh3HdfPath = null;
-            String srcName = tree.getName();
-            mDh3SourceName = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
-
-            mDh3Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_SHOW_DH3, true)
-                .apply();
-
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED, false);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED, true);
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_PATH, destDir.getAbsolutePath());
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME, "DH3");
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME, "DH3");
-            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI, -128);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_READONLY, false);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH3_HDF) {
-            if (uri == null) return;
-            String name = getDisplayName(uri);
-            if (!isValidHdfExtension(name)) {
-                Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                takeReadPermissionIfPossible(uri, data.getFlags());
-            } catch (Throwable ignored) {
-            }
-            boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
-            importDhHdfAsync(3, uri, hasWrite);
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH4_DIR) {
-            if (uri == null) return;
-            DocumentFile tree = DocumentFile.fromTreeUri(this, uri);
-            if (tree == null || !tree.isDirectory()) {
-                Toast.makeText(this, "Invalid DH4 folder", Toast.LENGTH_SHORT).show();
-                return;
-            }
-
-            File destDir = getInternalDh4Dir();
-            deleteRecursive(destDir);
-            ensureDir(destDir);
-
-            if (!copyDocumentTreeTo(tree, destDir, 8)) {
-                Toast.makeText(this, "Failed to import DH4 folder", Toast.LENGTH_LONG).show();
-                return;
-            }
-
-            mSelectedDh4Dir = destDir;
-            mSelectedDh4Hdf = null;
-            mSelectedDh4HdfPath = null;
-            String srcName = tree.getName();
-            mDh4SourceName = (srcName == null || srcName.trim().isEmpty()) ? uri.toString() : srcName;
-
-            mDh4Added = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_SHOW_DH4, true)
-                .apply();
-
-            SharedPreferences.Editor e = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, false);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, true);
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_PATH, destDir.getAbsolutePath());
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME, "DH4");
-            e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME, "DH4");
-            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI, -128);
-            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_READONLY, false);
-            e.apply();
-
-            saveSourceNames();
-            refreshStatus();
-            maybeReopenMediaSwapperAfterPicker();
-            return;
-        }
-
-        if (requestCode == REQ_IMPORT_DH4_HDF) {
-            if (uri == null) return;
-            String name = getDisplayName(uri);
-            if (!isValidHdfExtension(name)) {
-                Toast.makeText(this, "Please select a hardfile image (.hdf)", Toast.LENGTH_LONG).show();
-                return;
-            }
-            try {
-                takeReadPermissionIfPossible(uri, data.getFlags());
-            } catch (Throwable ignored) {
-            }
-            boolean hasWrite = (data.getFlags() & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
-            importDhHdfAsync(4, uri, hasWrite);
+        if (handleDfImportResult(requestCode, uri, disksDir)) {
             return;
         }
     }

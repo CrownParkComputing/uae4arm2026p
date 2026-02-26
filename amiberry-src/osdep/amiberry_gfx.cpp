@@ -3674,6 +3674,10 @@ static int create_windows(struct AmigaMonitor* mon)
 		return 0;
 	}
 
+#ifdef USE_VULKAN
+	write_log(_T("Vulkan migration mode enabled (stage 1): SDL Vulkan platform support on, core renderer still using native SDL path.\n"));
+#endif
+
 	#ifndef AMIBERRY_ANDROID_MINIMAL
 	auto* const icon_surface = IMG_Load(prefix_with_data_path("amiberry.png").c_str());
 	if (icon_surface != nullptr)
