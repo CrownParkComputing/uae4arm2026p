@@ -167,6 +167,10 @@ public class BootstrapActivity extends Activity {
     private static final String INTERNAL_DH2_HDF_PREFIX = "dh2";
     private static final String INTERNAL_DH3_HDF_PREFIX = "dh3";
     private static final String INTERNAL_DH4_HDF_PREFIX = "dh4";
+    private static final String INTERNAL_DH5_DIR = "dh5";
+    private static final String INTERNAL_DH6_DIR = "dh6";
+    private static final String INTERNAL_DH5_HDF_PREFIX = "dh5";
+    private static final String INTERNAL_DH6_HDF_PREFIX = "dh6";
 
     private static final int REQ_FIRST_RUN_FOLDER = 1000;
     private static final int REQ_IMPORT_KICKSTART = 1001;
@@ -190,11 +194,18 @@ public class BootstrapActivity extends Activity {
     private static final int REQ_IMPORT_DH3_DIR = 1018;
     private static final int REQ_IMPORT_DH4_HDF = 1019;
     private static final int REQ_IMPORT_DH4_DIR = 1020;
+    private static final int REQ_IMPORT_DH5_HDF = 1021;
+    private static final int REQ_IMPORT_DH5_DIR = 1022;
+    private static final int REQ_IMPORT_DH6_HDF = 1023;
+    private static final int REQ_IMPORT_DH6_DIR = 1024;
     private static final int REQ_IMPORT_WHDLOAD = 1030;
 
     private TextView mKickStatus;
     private android.widget.RadioButton[] mModelRadioButtons;
     private TextView mExtStatus;
+    private TextView mExtStatusInline;
+    private TextView mTxtRamInfo;
+    private android.widget.CheckBox mChkJitEnabled;
     private TextView mCd0Status;
     private TextView mDf0Status;
     private TextView mDf1Status;
@@ -221,6 +232,8 @@ public class BootstrapActivity extends Activity {
     private boolean mDh2Added;
     private boolean mDh3Added;
     private boolean mDh4Added;
+    private boolean mDh5Added;
+    private boolean mDh6Added;
 
     private Integer mFloppySpeedWhenOpenedFromEmu;
 
@@ -253,6 +266,8 @@ public class BootstrapActivity extends Activity {
     private String mDh2SigWhenOpenedFromEmu;
     private String mDh3SigWhenOpenedFromEmu;
     private String mDh4SigWhenOpenedFromEmu;
+    private String mDh5SigWhenOpenedFromEmu;
+    private String mDh6SigWhenOpenedFromEmu;
 
     private android.app.AlertDialog mMediaSwapperDialog;
 
@@ -520,6 +535,20 @@ public class BootstrapActivity extends Activity {
                 if (hdf) return "HDF:" + normalizeMediaPath(uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_HDF4_PATH, ""));
                 return "";
             }
+            if (dhIndex == 5) {
+                boolean dir = uaePrefs.getBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, false);
+                if (dir) return "DIR:" + normalizeMediaPath(uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, ""));
+                boolean hdf = uaePrefs.getBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, false);
+                if (hdf) return "HDF:" + normalizeMediaPath(uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_HDF5_PATH, ""));
+                return "";
+            }
+            if (dhIndex == 6) {
+                boolean dir = uaePrefs.getBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, false);
+                if (dir) return "DIR:" + normalizeMediaPath(uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, ""));
+                boolean hdf = uaePrefs.getBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, false);
+                if (hdf) return "HDF:" + normalizeMediaPath(uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_HDF6_PATH, ""));
+                return "";
+            }
             return "";
         } catch (Throwable ignored) {
             return "";
@@ -549,16 +578,22 @@ public class BootstrapActivity extends Activity {
             String dh2Now = dhSignatureFromUaePrefs(p, 2);
             String dh3Now = dhSignatureFromUaePrefs(p, 3);
             String dh4Now = dhSignatureFromUaePrefs(p, 4);
+            String dh5Now = dhSignatureFromUaePrefs(p, 5);
+            String dh6Now = dhSignatureFromUaePrefs(p, 6);
             String dh0Before = (mDh0SigWhenOpenedFromEmu == null) ? "" : mDh0SigWhenOpenedFromEmu;
             String dh1Before = (mDh1SigWhenOpenedFromEmu == null) ? "" : mDh1SigWhenOpenedFromEmu;
             String dh2Before = (mDh2SigWhenOpenedFromEmu == null) ? "" : mDh2SigWhenOpenedFromEmu;
             String dh3Before = (mDh3SigWhenOpenedFromEmu == null) ? "" : mDh3SigWhenOpenedFromEmu;
             String dh4Before = (mDh4SigWhenOpenedFromEmu == null) ? "" : mDh4SigWhenOpenedFromEmu;
+            String dh5Before = (mDh5SigWhenOpenedFromEmu == null) ? "" : mDh5SigWhenOpenedFromEmu;
+            String dh6Before = (mDh6SigWhenOpenedFromEmu == null) ? "" : mDh6SigWhenOpenedFromEmu;
             boolean dhChanged = !dh0Now.equals(dh0Before)
                 || !dh1Now.equals(dh1Before)
                 || !dh2Now.equals(dh2Before)
                 || !dh3Now.equals(dh3Before)
-                || !dh4Now.equals(dh4Before);
+                || !dh4Now.equals(dh4Before)
+                || !dh5Now.equals(dh5Before)
+                || !dh6Now.equals(dh6Before);
             if (dhChanged) return 2;
             if (cdChanged) return 2;
 
@@ -720,7 +755,7 @@ public class BootstrapActivity extends Activity {
     }
 
     private void removeDhCompletelyFromUaePrefs(int dhIndex) {
-        if (dhIndex < 2 || dhIndex > 4) return;
+        if (dhIndex < 2 || dhIndex > 6) return;
         try {
             SharedPreferences.Editor launcherEd = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
             SharedPreferences.Editor uaeEd = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
@@ -761,6 +796,30 @@ public class BootstrapActivity extends Activity {
                 uaeEd.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, false);
                 uaeEd.remove(UaeOptionKeys.UAE_DRIVE_DIR4_PATH);
                 uaeEd.remove(UaeOptionKeys.UAE_DRIVE_HDF4_PATH);
+            } else if (dhIndex == 5) {
+                deleteRecursive(getInternalDh5Dir());
+                mSelectedDh5Dir = null;
+                mSelectedDh5Hdf = null;
+                mSelectedDh5HdfPath = null;
+                mDh5SourceName = null;
+                mDh5Added = false;
+                launcherEd.putBoolean(PREF_SHOW_DH5, false);
+                uaeEd.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, false);
+                uaeEd.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, false);
+                uaeEd.remove(UaeOptionKeys.UAE_DRIVE_DIR5_PATH);
+                uaeEd.remove(UaeOptionKeys.UAE_DRIVE_HDF5_PATH);
+            } else if (dhIndex == 6) {
+                deleteRecursive(getInternalDh6Dir());
+                mSelectedDh6Dir = null;
+                mSelectedDh6Hdf = null;
+                mSelectedDh6HdfPath = null;
+                mDh6SourceName = null;
+                mDh6Added = false;
+                launcherEd.putBoolean(PREF_SHOW_DH6, false);
+                uaeEd.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, false);
+                uaeEd.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, false);
+                uaeEd.remove(UaeOptionKeys.UAE_DRIVE_DIR6_PATH);
+                uaeEd.remove(UaeOptionKeys.UAE_DRIVE_HDF6_PATH);
             }
 
             launcherEd.apply();
@@ -776,7 +835,7 @@ public class BootstrapActivity extends Activity {
     }
 
     private void showDhTypePickerDialog(int dhIndex) {
-        if (dhIndex < 2 || dhIndex > 4) return;
+        if (dhIndex < 2 || dhIndex > 6) return;
         try {
             new AlertDialog.Builder(this)
                 .setTitle("Select DH" + dhIndex)
@@ -784,11 +843,15 @@ public class BootstrapActivity extends Activity {
                     if (which == 0) {
                         if (dhIndex == 2) pickDh2Folder();
                         else if (dhIndex == 3) pickDh3Folder();
-                        else pickDh4Folder();
+                        else if (dhIndex == 4) pickDh4Folder();
+                        else if (dhIndex == 5) pickDh5Folder();
+                        else pickDh6Folder();
                     } else {
                         if (dhIndex == 2) pickDh2Hdf();
                         else if (dhIndex == 3) pickDh3Hdf();
-                        else pickDh4Hdf();
+                        else if (dhIndex == 4) pickDh4Hdf();
+                        else if (dhIndex == 5) pickDh5Hdf();
+                        else pickDh6Hdf();
                     }
                 })
                 .setNegativeButton(android.R.string.cancel, null)
@@ -797,7 +860,9 @@ public class BootstrapActivity extends Activity {
             // Fallback: default to folder picker.
             if (dhIndex == 2) pickDh2Folder();
             else if (dhIndex == 3) pickDh3Folder();
-            else pickDh4Folder();
+            else if (dhIndex == 4) pickDh4Folder();
+            else if (dhIndex == 5) pickDh5Folder();
+            else pickDh6Folder();
         }
     }
 
@@ -1202,6 +1267,48 @@ public class BootstrapActivity extends Activity {
                         () -> removeDhCompletelyFromUaePrefs(4)
                     );
                 }
+
+                String dh5Sig = dhSignatureFromUaePrefs(p, 5);
+                boolean dh5IsDir = dh5Sig.startsWith("DIR:");
+                if (mDh5Added) {
+                    String label;
+                    if (dh5Sig.isEmpty()) {
+                        label = "DH5: (not set)";
+                    } else {
+                        String path = dh5Sig.substring(4);
+                        label = "DH5 (" + (dh5IsDir ? "Folder" : "HDF") + "): " + shortLabelForPath(path);
+                    }
+                    addMediaSwapperRowWithClear(
+                        root,
+                        label,
+                        () -> {
+                            if (dh5IsDir) pickDh5Folder(); else pickDh5Hdf();
+                        },
+                        "Remove",
+                        () -> removeDhCompletelyFromUaePrefs(5)
+                    );
+                }
+
+                String dh6Sig = dhSignatureFromUaePrefs(p, 6);
+                boolean dh6IsDir = dh6Sig.startsWith("DIR:");
+                if (mDh6Added) {
+                    String label;
+                    if (dh6Sig.isEmpty()) {
+                        label = "DH6: (not set)";
+                    } else {
+                        String path = dh6Sig.substring(4);
+                        label = "DH6 (" + (dh6IsDir ? "Folder" : "HDF") + "): " + shortLabelForPath(path);
+                    }
+                    addMediaSwapperRowWithClear(
+                        root,
+                        label,
+                        () -> {
+                            if (dh6IsDir) pickDh6Folder(); else pickDh6Hdf();
+                        },
+                        "Remove",
+                        () -> removeDhCompletelyFromUaePrefs(6)
+                    );
+                }
             }
 
             if (mLaunchedFromEmulatorMenu) {
@@ -1335,6 +1442,8 @@ public class BootstrapActivity extends Activity {
         if (!mDh2Added) slots.add(new DhSlot(2, "DH2"));
         if (!mDh3Added) slots.add(new DhSlot(3, "DH3"));
         if (!mDh4Added) slots.add(new DhSlot(4, "DH4"));
+        if (!mDh5Added) slots.add(new DhSlot(5, "DH5"));
+        if (!mDh6Added) slots.add(new DhSlot(6, "DH6"));
 
         if (slots.isEmpty()) {
             Toast.makeText(this, "No free DH slots available.", Toast.LENGTH_SHORT).show();
@@ -1367,6 +1476,8 @@ public class BootstrapActivity extends Activity {
         if (mDh2Added) return 2;
         if (mDh3Added) return 3;
         if (mDh4Added) return 4;
+        if (mDh5Added) return 5;
+        if (mDh6Added) return 6;
         return -1;
     }
 
@@ -1386,6 +1497,10 @@ public class BootstrapActivity extends Activity {
                 return PREF_DH3_VOLNAME;
             case 4:
                 return PREF_DH4_VOLNAME;
+            case 5:
+                return PREF_DH5_VOLNAME;
+            case 6:
+                return PREF_DH6_VOLNAME;
             default:
                 return null;
         }
@@ -1416,7 +1531,7 @@ public class BootstrapActivity extends Activity {
     }
 
     private void promptDhVolumeNameThen(int dhIndex, Runnable onContinue) {
-        if (dhIndex < 0 || dhIndex > 4) {
+        if (dhIndex < 0 || dhIndex > 6) {
             if (onContinue != null) onContinue.run();
             return;
         }
@@ -1462,6 +1577,14 @@ public class BootstrapActivity extends Activity {
         }
         if (dhIndex == 4) {
             if (folder) pickDh4Folder(); else pickDh4Hdf();
+            return;
+        }
+        if (dhIndex == 5) {
+            if (folder) pickDh5Folder(); else pickDh5Hdf();
+            return;
+        }
+        if (dhIndex == 6) {
+            if (folder) pickDh6Folder(); else pickDh6Hdf();
         }
     }
 
@@ -1517,6 +1640,20 @@ public class BootstrapActivity extends Activity {
                 e.putBoolean(PREF_SHOW_DH4, true).apply();
                 refreshStatus();
                 if (folder) pickDh4Folder(); else pickDh4Hdf();
+                return;
+            }
+            if (dhIndex == 5) {
+                mDh5Added = true;
+                e.putBoolean(PREF_SHOW_DH5, true).apply();
+                refreshStatus();
+                if (folder) pickDh5Folder(); else pickDh5Hdf();
+                return;
+            }
+            if (dhIndex == 6) {
+                mDh6Added = true;
+                e.putBoolean(PREF_SHOW_DH6, true).apply();
+                refreshStatus();
+                if (folder) pickDh6Folder(); else pickDh6Hdf();
             }
         } catch (Throwable ignored) {
             // Fallback: use existing pickers.
@@ -1530,6 +1667,10 @@ public class BootstrapActivity extends Activity {
                 if (folder) pickDh3Folder(); else pickDh3Hdf();
             } else if (dhIndex == 4) {
                 if (folder) pickDh4Folder(); else pickDh4Hdf();
+            } else if (dhIndex == 5) {
+                if (folder) pickDh5Folder(); else pickDh5Hdf();
+            } else if (dhIndex == 6) {
+                if (folder) pickDh6Folder(); else pickDh6Hdf();
             }
         }
     }
@@ -1550,6 +1691,8 @@ public class BootstrapActivity extends Activity {
             mDh2Added = false;
             mDh3Added = false;
             mDh4Added = false;
+            mDh5Added = false;
+            mDh6Added = false;
             mCd0Added = false;
 
             // Persist cleared states
@@ -1563,6 +1706,8 @@ public class BootstrapActivity extends Activity {
                 .putBoolean(PREF_SHOW_DH2, false)
                 .putBoolean(PREF_SHOW_DH3, false)
                 .putBoolean(PREF_SHOW_DH4, false)
+                .putBoolean(PREF_SHOW_DH5, false)
+                .putBoolean(PREF_SHOW_DH6, false)
                 .putBoolean(PREF_SHOW_CD0, false)
                 .apply();
 
@@ -1594,6 +1739,14 @@ public class BootstrapActivity extends Activity {
                 .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, false)
                 .remove(UaeOptionKeys.UAE_DRIVE_HDF4_PATH)
                 .remove(UaeOptionKeys.UAE_DRIVE_DIR4_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF5_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR5_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF6_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR6_PATH)
                 .apply();
 
             // Clear WHDBooter cached game/settings
@@ -1613,6 +1766,8 @@ public class BootstrapActivity extends Activity {
             mSelectedDh2Hdf = null; mSelectedDh2HdfPath = null; mSelectedDh2Dir = null; mDh2SourceName = null;
             mSelectedDh3Hdf = null; mSelectedDh3HdfPath = null; mSelectedDh3Dir = null; mDh3SourceName = null;
             mSelectedDh4Hdf = null; mSelectedDh4HdfPath = null; mSelectedDh4Dir = null; mDh4SourceName = null;
+            mSelectedDh5Hdf = null; mSelectedDh5HdfPath = null; mSelectedDh5Dir = null; mDh5SourceName = null;
+            mSelectedDh6Hdf = null; mSelectedDh6HdfPath = null; mSelectedDh6Dir = null; mDh6SourceName = null;
 
             saveSourceNames();
 
@@ -1669,6 +1824,8 @@ public class BootstrapActivity extends Activity {
             mDh2Added = false;
             mDh3Added = false;
             mDh4Added = false;
+            mDh5Added = false;
+            mDh6Added = false;
             mCd0Added = false;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit()
@@ -1680,6 +1837,8 @@ public class BootstrapActivity extends Activity {
                 .putBoolean(PREF_SHOW_DH2, false)
                 .putBoolean(PREF_SHOW_DH3, false)
                 .putBoolean(PREF_SHOW_DH4, false)
+                .putBoolean(PREF_SHOW_DH5, false)
+                .putBoolean(PREF_SHOW_DH6, false)
                 .putBoolean(PREF_SHOW_CD0, false)
                 .apply();
 
@@ -1711,6 +1870,14 @@ public class BootstrapActivity extends Activity {
                 .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, false)
                 .remove(UaeOptionKeys.UAE_DRIVE_HDF4_PATH)
                 .remove(UaeOptionKeys.UAE_DRIVE_DIR4_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF5_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR5_PATH)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, false)
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, false)
+                .remove(UaeOptionKeys.UAE_DRIVE_HDF6_PATH)
+                .remove(UaeOptionKeys.UAE_DRIVE_DIR6_PATH)
                 .apply();
 
             // Clear WHDBooter persisted game/settings so every fresh app start begins clean.
@@ -1755,6 +1922,14 @@ public class BootstrapActivity extends Activity {
             mSelectedDh4HdfPath = null;
             mSelectedDh4Dir = null;
             mDh4SourceName = null;
+            mSelectedDh5Hdf = null;
+            mSelectedDh5HdfPath = null;
+            mSelectedDh5Dir = null;
+            mDh5SourceName = null;
+            mSelectedDh6Hdf = null;
+            mSelectedDh6HdfPath = null;
+            mSelectedDh6Dir = null;
+            mDh6SourceName = null;
 
             saveSourceNames();
         } catch (Throwable ignored) {
@@ -2014,6 +2189,10 @@ public class BootstrapActivity extends Activity {
     private File mSelectedDh3Dir;
     private File mSelectedDh4Hdf;
     private File mSelectedDh4Dir;
+    private File mSelectedDh5Hdf;
+    private File mSelectedDh5Dir;
+    private File mSelectedDh6Hdf;
+    private File mSelectedDh6Dir;
 
     // When media is selected via SAF, we keep it in-place and store a content:// URI.
     // File-based members above will be null for SAF selections.
@@ -2027,6 +2206,8 @@ public class BootstrapActivity extends Activity {
     private String mSelectedDh2HdfPath;
     private String mSelectedDh3HdfPath;
     private String mSelectedDh4HdfPath;
+    private String mSelectedDh5HdfPath;
+    private String mSelectedDh6HdfPath;
 
     private String mKickSourceName;
     private String mExtSourceName;
@@ -2040,6 +2221,8 @@ public class BootstrapActivity extends Activity {
     private String mDh2SourceName;
     private String mDh3SourceName;
     private String mDh4SourceName;
+    private String mDh5SourceName;
+    private String mDh6SourceName;
 
     // Avoid duplicate prompts (persisted across activity recreations).
     private boolean mPathsParentPromptShown = false;
@@ -2180,6 +2363,8 @@ public class BootstrapActivity extends Activity {
     private static final String PREF_DH2_SRC = "dh2_src";
     private static final String PREF_DH3_SRC = "dh3_src";
     private static final String PREF_DH4_SRC = "dh4_src";
+    private static final String PREF_DH5_SRC = "dh5_src";
+    private static final String PREF_DH6_SRC = "dh6_src";
 
     private static final String PREF_SHOW_DF1 = "show_df1";
     private static final String PREF_SHOW_DF2 = "show_df2";
@@ -2188,6 +2373,8 @@ public class BootstrapActivity extends Activity {
     private static final String PREF_SHOW_DH2 = "show_dh2";
     private static final String PREF_SHOW_DH3 = "show_dh3";
     private static final String PREF_SHOW_DH4 = "show_dh4";
+    private static final String PREF_SHOW_DH5 = "show_dh5";
+    private static final String PREF_SHOW_DH6 = "show_dh6";
     private static final String PREF_SHOW_DH0 = "show_dh0";
     private static final String PREF_SHOW_CD0 = "show_cd0";
 
@@ -2206,6 +2393,8 @@ public class BootstrapActivity extends Activity {
     private static final String PREF_DH2_VOLNAME = "dh2_volname";
     private static final String PREF_DH3_VOLNAME = "dh3_volname";
     private static final String PREF_DH4_VOLNAME = "dh4_volname";
+    private static final String PREF_DH5_VOLNAME = "dh5_volname";
+    private static final String PREF_DH6_VOLNAME = "dh6_volname";
 
     private static final String PREF_DH1_MODE = "dh1_mode";
     private static final String DH1_MODE_HDF = "hdf";
@@ -2560,6 +2749,14 @@ public class BootstrapActivity extends Activity {
         return new File(getInternalHarddrivesDir(), INTERNAL_DH4_DIR);
     }
 
+    private File getInternalDh5Dir() {
+        return new File(getInternalHarddrivesDir(), INTERNAL_DH5_DIR);
+    }
+
+    private File getInternalDh6Dir() {
+        return new File(getInternalHarddrivesDir(), INTERNAL_DH6_DIR);
+    }
+
     private void repairDh0PrefsFromInternalImportIfPossible(SharedPreferences launcherPrefs) {
         if (launcherPrefs == null) return;
 
@@ -2614,6 +2811,10 @@ public class BootstrapActivity extends Activity {
                 return INTERNAL_DH3_HDF_PREFIX;
             case 4:
                 return INTERNAL_DH4_HDF_PREFIX;
+            case 5:
+                return INTERNAL_DH5_HDF_PREFIX;
+            case 6:
+                return INTERNAL_DH6_HDF_PREFIX;
         }
         return "dh" + dhIndex;
     }
@@ -2714,6 +2915,30 @@ public class BootstrapActivity extends Activity {
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF4_PATH, uriString);
                 e.putString(UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME, getDhVolumeName(4));
                 e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_READONLY, !hasWrite);
+            } else if (dhIndex == 5) {
+                mSelectedDh5Dir = null;
+                mSelectedDh5Hdf = null;
+                mSelectedDh5HdfPath = uriString;
+                mDh5SourceName = srcName;
+                mDh5Added = true;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DH5, true).apply();
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, false);
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, true);
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF5_PATH, uriString);
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF5_DEVNAME, getDhVolumeName(5));
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_READONLY, !hasWrite);
+            } else if (dhIndex == 6) {
+                mSelectedDh6Dir = null;
+                mSelectedDh6Hdf = null;
+                mSelectedDh6HdfPath = uriString;
+                mDh6SourceName = srcName;
+                mDh6Added = true;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DH6, true).apply();
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, false);
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, true);
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF6_PATH, uriString);
+                e.putString(UaeOptionKeys.UAE_DRIVE_HDF6_DEVNAME, getDhVolumeName(6));
+                e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_READONLY, !hasWrite);
             }
 
             e.apply();
@@ -2974,6 +3199,58 @@ public class BootstrapActivity extends Activity {
             intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
         }
         startActivityForResult(intent, REQ_IMPORT_DH4_DIR);
+    }
+
+    private void pickDh5Hdf() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        }
+        startActivityForResult(intent, REQ_IMPORT_DH5_HDF);
+    }
+
+    private void pickDh5Folder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        }
+        startActivityForResult(intent, REQ_IMPORT_DH5_DIR);
+    }
+
+    private void pickDh6Hdf() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        }
+        startActivityForResult(intent, REQ_IMPORT_DH6_HDF);
+    }
+
+    private void pickDh6Folder() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        }
+        startActivityForResult(intent, REQ_IMPORT_DH6_DIR);
     }
 
     private void pickWHDLoadFile() {
@@ -4523,6 +4800,8 @@ public class BootstrapActivity extends Activity {
             .putString(PREF_DH2_SRC, mDh2SourceName)
             .putString(PREF_DH3_SRC, mDh3SourceName)
             .putString(PREF_DH4_SRC, mDh4SourceName)
+            .putString(PREF_DH5_SRC, mDh5SourceName)
+            .putString(PREF_DH6_SRC, mDh6SourceName)
             .apply();
     }
 
@@ -4539,6 +4818,8 @@ public class BootstrapActivity extends Activity {
         mDh2SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH2_SRC, null);
         mDh3SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH3_SRC, null);
         mDh4SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH4_SRC, null);
+        mDh5SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH5_SRC, null);
+        mDh6SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH6_SRC, null);
     }
 
     private static boolean isLikelyRomFile(File f) {
@@ -5691,6 +5972,19 @@ public class BootstrapActivity extends Activity {
         addDriveIcon(strip, hdResId, "DH4", isDhSlotEnabled(4), hasDhMedia(4), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(4), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 4));
+        addDriveIcon(strip, hdResId, "DH5", isDhSlotEnabled(5), hasDhMedia(5), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(5), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 5));
+        addDriveIcon(strip, hdResId, "DH6", isDhSlotEnabled(6), hasDhMedia(6), iconSizePx, marginPx,
+            v -> onHardDriveSlotTapped(6), v -> { promptRemoveHardDrive(); return true; },
+            getDriveMediaName("DH", 6));
+
+        View hdCdSpacer = new View(this);
+        LinearLayout.LayoutParams hdCdSpacerLp = new LinearLayout.LayoutParams((int) (12 * density), 1);
+        hdCdSpacerLp.setMargins((int) (8 * density), 0, (int) (8 * density), 0);
+        hdCdSpacer.setLayoutParams(hdCdSpacerLp);
+        strip.addView(hdCdSpacer);
+
         addDriveIcon(strip, cdResId, "CD0", isCdSlotEnabled(), hasCd0(), iconSizePx, marginPx,
             v -> onCdSlotTapped(), null, getDriveMediaName("CD", 0));
         addDriveIcon(strip, lhaResId, "LHA", true, false, iconSizePx, marginPx,
@@ -5717,6 +6011,8 @@ public class BootstrapActivity extends Activity {
             case 2: return mDh2Added || hasDhMedia(2);
             case 3: return mDh3Added || hasDhMedia(3);
             case 4: return mDh4Added || hasDhMedia(4);
+            case 5: return mDh5Added || hasDhMedia(5);
+            case 6: return mDh6Added || hasDhMedia(6);
             default: return false;
         }
     }
@@ -5747,6 +6043,14 @@ public class BootstrapActivity extends Activity {
                 return (mSelectedDh4Dir != null && mSelectedDh4Dir.exists() && mSelectedDh4Dir.isDirectory())
                     || isReadableMediaPath(mSelectedDh4HdfPath)
                     || (mSelectedDh4Hdf != null && mSelectedDh4Hdf.exists() && mSelectedDh4Hdf.isFile() && mSelectedDh4Hdf.canRead());
+            case 5:
+                return (mSelectedDh5Dir != null && mSelectedDh5Dir.exists() && mSelectedDh5Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh5HdfPath)
+                    || (mSelectedDh5Hdf != null && mSelectedDh5Hdf.exists() && mSelectedDh5Hdf.isFile() && mSelectedDh5Hdf.canRead());
+            case 6:
+                return (mSelectedDh6Dir != null && mSelectedDh6Dir.exists() && mSelectedDh6Dir.isDirectory())
+                    || isReadableMediaPath(mSelectedDh6HdfPath)
+                    || (mSelectedDh6Hdf != null && mSelectedDh6Hdf.exists() && mSelectedDh6Hdf.isFile() && mSelectedDh6Hdf.canRead());
             default:
                 return false;
         }
@@ -5782,6 +6086,12 @@ public class BootstrapActivity extends Activity {
         } else if (slot == 4 && !mDh4Added) {
             mDh4Added = true;
             ed.putBoolean(PREF_SHOW_DH4, true).apply();
+        } else if (slot == 5 && !mDh5Added) {
+            mDh5Added = true;
+            ed.putBoolean(PREF_SHOW_DH5, true).apply();
+        } else if (slot == 6 && !mDh6Added) {
+            mDh6Added = true;
+            ed.putBoolean(PREF_SHOW_DH6, true).apply();
         }
         refreshStatus();
 
@@ -5794,13 +6104,17 @@ public class BootstrapActivity extends Activity {
                     else if (slot == 1) pickDh1Hdf();
                     else if (slot == 2) pickDh2Hdf();
                     else if (slot == 3) pickDh3Hdf();
-                    else pickDh4Hdf();
+                    else if (slot == 4) pickDh4Hdf();
+                    else if (slot == 5) pickDh5Hdf();
+                    else pickDh6Hdf();
                 } else if (which == 1) {
                     if (slot == 0) pickDh0Folder();
                     else if (slot == 1) pickDh1Folder();
                     else if (slot == 2) pickDh2Folder();
                     else if (slot == 3) pickDh3Folder();
-                    else pickDh4Folder();
+                    else if (slot == 4) pickDh4Folder();
+                    else if (slot == 5) pickDh5Folder();
+                    else pickDh6Folder();
                 } else {
                     if (slot == 0) {
                         clearDh0FromUaePrefs();
@@ -5834,6 +6148,8 @@ public class BootstrapActivity extends Activity {
                     case 2: return mDh2SourceName;
                     case 3: return mDh3SourceName;
                     case 4: return mDh4SourceName;
+                    case 5: return mDh5SourceName;
+                    case 6: return mDh6SourceName;
                 }
                 break;
             case "CD":
@@ -6284,6 +6600,14 @@ public class BootstrapActivity extends Activity {
             names.add("DH4");
             actions.add(() -> { removeDhCompletelyFromUaePrefs(4); refreshStatus(); });
         }
+        if (mDh5Added) {
+            names.add("DH5");
+            actions.add(() -> { removeDhCompletelyFromUaePrefs(5); refreshStatus(); });
+        }
+        if (mDh6Added) {
+            names.add("DH6");
+            actions.add(() -> { removeDhCompletelyFromUaePrefs(6); refreshStatus(); });
+        }
         if (names.isEmpty()) {
             Toast.makeText(this, "No hard drives to remove.", Toast.LENGTH_SHORT).show();
             return;
@@ -6375,6 +6699,46 @@ public class BootstrapActivity extends Activity {
             } else {
                 mExtStatus.setText("Ext ROM: (not selected)");
             }
+        }
+        // Inline ext ROM status shown next to kickstart text
+        if (mExtStatusInline != null) {
+            boolean showExt = "CD32".equalsIgnoreCase(baseModelId);
+            mExtStatusInline.setVisibility(showExt ? View.VISIBLE : View.GONE);
+            if (showExt) {
+                if (mSelectedExt != null && mSelectedExt.exists() && mSelectedExt.length() > 0) {
+                    mExtStatusInline.setText(labelWithSource("Ext ROM", mSelectedExt, mExtSourceName));
+                } else {
+                    mExtStatusInline.setText("Ext ROM: (not selected)");
+                }
+            }
+        }
+        // Update RAM info text above Amiga graphic
+        if (mTxtRamInfo != null) {
+            try {
+                SharedPreferences uaeP = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                // chipmem_size is in units of 512K; fastmem_bytes is bytes; z3mem_size_mb is MB
+                int chipUnits = uaeP.getInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, 0);
+                int fastBytes = uaeP.getInt(UaeOptionKeys.UAE_MEM_FASTMEM_BYTES, 0);
+                int z3Mb      = uaeP.getInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 0);
+                StringBuilder ramSb = new StringBuilder();
+                if (chipUnits > 0) {
+                    // Each unit = 512 KB; show in KB when < 1 MB, else in MB
+                    int chipKb = chipUnits * 512;
+                    if (chipKb < 1024) ramSb.append("Chip:").append(chipKb).append("K ");
+                    else ramSb.append("Chip:").append(chipKb / 1024).append("MB ");
+                }
+                if (fastBytes > 0) ramSb.append("Fast:").append(fastBytes / (1024 * 1024)).append("MB ");
+                if (z3Mb > 0)     ramSb.append("Z3:").append(z3Mb).append("MB");
+                mTxtRamInfo.setText(ramSb.toString().trim());
+            } catch (Throwable ignored) {}
+        }
+        // Sync JIT checkbox
+        if (mChkJitEnabled != null) {
+            try {
+                SharedPreferences uaeP = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                boolean jitOn = uaeP.getBoolean(UaeOptionKeys.UAE_JIT_ENABLED, false);
+                mChkJitEnabled.setChecked(jitOn);
+            } catch (Throwable ignored) {}
         }
 
         if (mCd0Status != null) {
@@ -6655,6 +7019,8 @@ public class BootstrapActivity extends Activity {
                 mDh2SigWhenOpenedFromEmu = dhSignatureFromUaePrefs(uaePrefs, 2);
                 mDh3SigWhenOpenedFromEmu = dhSignatureFromUaePrefs(uaePrefs, 3);
                 mDh4SigWhenOpenedFromEmu = dhSignatureFromUaePrefs(uaePrefs, 4);
+                mDh5SigWhenOpenedFromEmu = dhSignatureFromUaePrefs(uaePrefs, 5);
+                mDh6SigWhenOpenedFromEmu = dhSignatureFromUaePrefs(uaePrefs, 6);
                 mFloppySpeedWhenOpenedFromEmu = uaePrefs.getInt(UaeOptionKeys.UAE_FLOPPY_SPEED, 100);
             } catch (Throwable ignored) {
                 mDf0PathWhenOpenedFromEmu = "";
@@ -6668,6 +7034,8 @@ public class BootstrapActivity extends Activity {
                 mDh2SigWhenOpenedFromEmu = "";
                 mDh3SigWhenOpenedFromEmu = "";
                 mDh4SigWhenOpenedFromEmu = "";
+                mDh5SigWhenOpenedFromEmu = "";
+                mDh6SigWhenOpenedFromEmu = "";
                 mFloppySpeedWhenOpenedFromEmu = 100;
             }
 
@@ -6864,6 +7232,19 @@ public class BootstrapActivity extends Activity {
         mKickStatus = findViewById(R.id.txtKickStatus);
         mExtRomSection = findViewById(R.id.extRomSection);
         mExtStatus = findViewById(R.id.txtExtStatus);
+        mExtStatusInline = findViewById(R.id.txtExtStatusInline);
+        mTxtRamInfo = findViewById(R.id.txtRamInfo);
+        mChkJitEnabled = findViewById(R.id.chkJitEnabled);
+        if (mChkJitEnabled != null) {
+            mChkJitEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                try {
+                    getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, isChecked)
+                        .apply();
+                } catch (Throwable ignored) {}
+            });
+        }
         mCd0Status = findViewById(R.id.txtCd0Status);
         mDf0Status = findViewById(R.id.txtDf0Status);
         mDf1Status = findViewById(R.id.txtDf1Status);
@@ -6983,6 +7364,8 @@ public class BootstrapActivity extends Activity {
         mDh2Added = launcherPrefs.getBoolean(PREF_SHOW_DH2, false);
         mDh3Added = launcherPrefs.getBoolean(PREF_SHOW_DH3, false);
         mDh4Added = launcherPrefs.getBoolean(PREF_SHOW_DH4, false);
+        mDh5Added = launcherPrefs.getBoolean(PREF_SHOW_DH5, false);
+        mDh6Added = launcherPrefs.getBoolean(PREF_SHOW_DH6, false);
 
         mDh0Added = launcherPrefs.getBoolean(PREF_SHOW_DH0, false);
         mCd0Added = launcherPrefs.getBoolean(PREF_SHOW_CD0, false);
@@ -7237,6 +7620,38 @@ public class BootstrapActivity extends Activity {
             }
         }
 
+        BootstrapSelectionUtils.FileOrUri hdf5Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_HDF5_PATH);
+        if (hdf5Sel.uri != null && canReadContentUri(hdf5Sel.uri)) {
+            mSelectedDh5Hdf = null;
+            mSelectedDh5HdfPath = hdf5Sel.uri;
+        } else if (hdf5Sel.file != null) {
+            mSelectedDh5Hdf = hdf5Sel.file;
+            mSelectedDh5HdfPath = null;
+        }
+        String dir5Path = p.getString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, null);
+        if (dir5Path != null && !dir5Path.trim().isEmpty()) {
+            File f = new File(dir5Path.trim());
+            if (f.exists() && f.isDirectory() && f.canRead()) {
+                mSelectedDh5Dir = f;
+            }
+        }
+
+        BootstrapSelectionUtils.FileOrUri hdf6Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_HDF6_PATH);
+        if (hdf6Sel.uri != null && canReadContentUri(hdf6Sel.uri)) {
+            mSelectedDh6Hdf = null;
+            mSelectedDh6HdfPath = hdf6Sel.uri;
+        } else if (hdf6Sel.file != null) {
+            mSelectedDh6Hdf = hdf6Sel.file;
+            mSelectedDh6HdfPath = null;
+        }
+        String dir6Path = p.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, null);
+        if (dir6Path != null && !dir6Path.trim().isEmpty()) {
+            File f = new File(dir6Path.trim());
+            if (f.exists() && f.isDirectory() && f.canRead()) {
+                mSelectedDh6Dir = f;
+            }
+        }
+
         // If this is an upgrade from an older build, source-name prefs may be missing.
         // Derive display names from the stable internal filename when possible.
         maybeDeriveAndPersistMissingSourceNames();
@@ -7454,6 +7869,15 @@ public class BootstrapActivity extends Activity {
             return;
         }
         super.onBackPressed();
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            // Refresh the UI when the window regains focus (e.g. after minimise/restore).
+            refreshStatus();
+        }
     }
 
     @Override
@@ -8012,6 +8436,60 @@ public class BootstrapActivity extends Activity {
         } catch (Throwable ignored) {
         }
 
+        // DH5 (optional)
+        try {
+            BootstrapSelectionUtils.FileOrUri hdf5Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_HDF5_PATH);
+            mSelectedDh5Hdf = hdf5Sel.file;
+            mSelectedDh5HdfPath = hdf5Sel.uri;
+
+            if (mSelectedDh5HdfPath != null) {
+                mDh5SourceName = deriveSourceNameFromUriIfMissing(mDh5SourceName, mSelectedDh5HdfPath);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            String dir5Path = p.getString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, null);
+            if (dir5Path != null && !dir5Path.trim().isEmpty()) {
+                File f = new File(dir5Path.trim());
+                if (f.exists() && f.isDirectory() && f.canRead()) {
+                    mSelectedDh5Dir = f;
+                } else {
+                    mSelectedDh5Dir = null;
+                }
+            } else {
+                mSelectedDh5Dir = null;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        // DH6 (optional)
+        try {
+            BootstrapSelectionUtils.FileOrUri hdf6Sel = BootstrapSelectionUtils.readFileOrContentUriPref(p, UaeOptionKeys.UAE_DRIVE_HDF6_PATH);
+            mSelectedDh6Hdf = hdf6Sel.file;
+            mSelectedDh6HdfPath = hdf6Sel.uri;
+
+            if (mSelectedDh6HdfPath != null) {
+                mDh6SourceName = deriveSourceNameFromUriIfMissing(mDh6SourceName, mSelectedDh6HdfPath);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            String dir6Path = p.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, null);
+            if (dir6Path != null && !dir6Path.trim().isEmpty()) {
+                File f = new File(dir6Path.trim());
+                if (f.exists() && f.isDirectory() && f.canRead()) {
+                    mSelectedDh6Dir = f;
+                } else {
+                    mSelectedDh6Dir = null;
+                }
+            } else {
+                mSelectedDh6Dir = null;
+            }
+        } catch (Throwable ignored) {
+        }
+
         // Do not auto-enable DH1 on startup just because a path exists.
         // The Quickstart UI (Add DH1) is authoritative.
 
@@ -8031,6 +8509,8 @@ public class BootstrapActivity extends Activity {
             boolean dh2Configured = dhCfg.dh2Configured;
             boolean dh3Configured = dhCfg.dh3Configured;
             boolean dh4Configured = dhCfg.dh4Configured;
+            boolean dh5Configured = dhCfg.dh5Configured;
+            boolean dh6Configured = dhCfg.dh6Configured;
             boolean dh0UiSelected = hasDh0();
 
             SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -8060,6 +8540,14 @@ public class BootstrapActivity extends Activity {
                 mDh4Added = true;
                 launcherPrefs.edit().putBoolean(PREF_SHOW_DH4, true).apply();
             }
+            if (dh5Configured && !mDh5Added) {
+                mDh5Added = true;
+                launcherPrefs.edit().putBoolean(PREF_SHOW_DH5, true).apply();
+            }
+            if (dh6Configured && !mDh6Added) {
+                mDh6Added = true;
+                launcherPrefs.edit().putBoolean(PREF_SHOW_DH6, true).apply();
+            }
 
             // If the UI says "added" but there is no configured media at all, hide it.
             if (mDh0Added && !dh0Configured && !dh1Configured && !dh2Configured && !dh3Configured && !dh4Configured && !dh0UiSelected) {
@@ -8082,6 +8570,14 @@ public class BootstrapActivity extends Activity {
             if (mDh4Added && !dh4Configured) {
                 mDh4Added = false;
                 launcherPrefs.edit().putBoolean(PREF_SHOW_DH4, false).apply();
+            }
+            if (mDh5Added && !dh5Configured) {
+                mDh5Added = false;
+                launcherPrefs.edit().putBoolean(PREF_SHOW_DH5, false).apply();
+            }
+            if (mDh6Added && !dh6Configured) {
+                mDh6Added = false;
+                launcherPrefs.edit().putBoolean(PREF_SHOW_DH6, false).apply();
             }
         } catch (Throwable ignored) {
         }
@@ -8181,6 +8677,8 @@ public class BootstrapActivity extends Activity {
                 buildMediaConfigName("harddrives", mDh2SourceName, mSelectedDh2Hdf, mSelectedDh2HdfPath),
                 buildMediaConfigName("harddrives", mDh3SourceName, mSelectedDh3Hdf, mSelectedDh3HdfPath),
                 buildMediaConfigName("harddrives", mDh4SourceName, mSelectedDh4Hdf, mSelectedDh4HdfPath),
+                buildMediaConfigName("harddrives", mDh5SourceName, mSelectedDh5Hdf, mSelectedDh5HdfPath),
+                buildMediaConfigName("harddrives", mDh6SourceName, mSelectedDh6Hdf, mSelectedDh6HdfPath),
                 buildMediaConfigName("floppies", mDf0SourceName, mSelectedDf0, mSelectedDf0Path),
                 buildMediaConfigName("floppies", mDf1SourceName, mSelectedDf1, mSelectedDf1Path),
                 buildMediaConfigName("floppies", mDf2SourceName, mSelectedDf2, mSelectedDf2Path),
@@ -8193,6 +8691,8 @@ public class BootstrapActivity extends Activity {
                 buildMediaConfigName("harddrives", mDh2SourceName, mSelectedDh2Hdf, mSelectedDh2HdfPath),
                 buildMediaConfigName("harddrives", mDh3SourceName, mSelectedDh3Hdf, mSelectedDh3HdfPath),
                 buildMediaConfigName("harddrives", mDh4SourceName, mSelectedDh4Hdf, mSelectedDh4HdfPath),
+                buildMediaConfigName("harddrives", mDh5SourceName, mSelectedDh5Hdf, mSelectedDh5HdfPath),
+                buildMediaConfigName("harddrives", mDh6SourceName, mSelectedDh6Hdf, mSelectedDh6HdfPath),
                 buildMediaConfigName("floppies", mDf0SourceName, mSelectedDf0, mSelectedDf0Path),
                 buildMediaConfigName("floppies", mDf1SourceName, mSelectedDf1, mSelectedDf1Path),
                 buildMediaConfigName("floppies", mDf2SourceName, mSelectedDf2, mSelectedDf2Path),
@@ -8379,6 +8879,10 @@ public class BootstrapActivity extends Activity {
             dhIndex = 3;
         } else if (requestCode == REQ_IMPORT_DH4_DIR) {
             dhIndex = 4;
+        } else if (requestCode == REQ_IMPORT_DH5_DIR) {
+            dhIndex = 5;
+        } else if (requestCode == REQ_IMPORT_DH6_DIR) {
+            dhIndex = 6;
         } else {
             return false;
         }
@@ -8407,6 +8911,12 @@ public class BootstrapActivity extends Activity {
                 break;
             case 4:
                 destDir = getInternalDh4Dir();
+                break;
+            case 5:
+                destDir = getInternalDh5Dir();
+                break;
+            case 6:
+                destDir = getInternalDh6Dir();
                 break;
             default:
                 return true;
@@ -8467,6 +8977,22 @@ public class BootstrapActivity extends Activity {
                 mDh4Added = true;
                 launcher.putBoolean(PREF_SHOW_DH4, true);
                 break;
+            case 5:
+                mSelectedDh5Dir = destDir;
+                mSelectedDh5Hdf = null;
+                mSelectedDh5HdfPath = null;
+                mDh5SourceName = source;
+                mDh5Added = true;
+                launcher.putBoolean(PREF_SHOW_DH5, true);
+                break;
+            case 6:
+                mSelectedDh6Dir = destDir;
+                mSelectedDh6Hdf = null;
+                mSelectedDh6HdfPath = null;
+                mDh6SourceName = source;
+                mDh6Added = true;
+                launcher.putBoolean(PREF_SHOW_DH6, true);
+                break;
         }
         launcher.apply();
 
@@ -8504,7 +9030,7 @@ public class BootstrapActivity extends Activity {
             e.putString(UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME, vol);
             e.putInt(UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI, -128);
             e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR3_READONLY, false);
-        } else {
+        } else if (dhIndex == 4) {
             e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED, false);
             e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED, true);
             e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_PATH, destDir.getAbsolutePath());
@@ -8512,6 +9038,22 @@ public class BootstrapActivity extends Activity {
             e.putString(UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME, vol);
             e.putInt(UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI, -128);
             e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR4_READONLY, false);
+        } else if (dhIndex == 5) {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR5_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR5_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR5_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR5_READONLY, false);
+        } else {
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED, false);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED, true);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, destDir.getAbsolutePath());
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR6_DEVNAME, vol);
+            e.putString(UaeOptionKeys.UAE_DRIVE_DIR6_VOLNAME, vol);
+            e.putInt(UaeOptionKeys.UAE_DRIVE_DIR6_BOOTPRI, -128);
+            e.putBoolean(UaeOptionKeys.UAE_DRIVE_DIR6_READONLY, false);
         }
         e.apply();
 
@@ -8533,6 +9075,10 @@ public class BootstrapActivity extends Activity {
             dhIndex = 3;
         } else if (requestCode == REQ_IMPORT_DH4_HDF) {
             dhIndex = 4;
+        } else if (requestCode == REQ_IMPORT_DH5_HDF) {
+            dhIndex = 5;
+        } else if (requestCode == REQ_IMPORT_DH6_HDF) {
+            dhIndex = 6;
         } else {
             return false;
         }

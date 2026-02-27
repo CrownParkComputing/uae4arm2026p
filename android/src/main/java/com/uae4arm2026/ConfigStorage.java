@@ -67,6 +67,8 @@ final class ConfigStorage {
         "dh2_src",
         "dh3_src",
         "dh4_src",
+        "dh5_src",
+        "dh6_src",
         "show_df1",
         "show_df2",
         "show_df3",
@@ -75,6 +77,8 @@ final class ConfigStorage {
         "show_dh2",
         "show_dh3",
         "show_dh4",
+        "show_dh5",
+        "show_dh6",
         "show_cd0",
         "boot_medium",
         "dh0_mode",
@@ -223,7 +227,7 @@ final class ConfigStorage {
             final String harddrivesDir = prefs.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null);
             final String kickstartsDir = prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
 
-            final String[] srcKeys = new String[] {"df0_src", "df1_src", "df2_src", "df3_src", "cd0_src", "dh0_src", "dh1_src", "dh2_src", "dh3_src", "dh4_src"};
+            final String[] srcKeys = new String[] {"df0_src", "df1_src", "df2_src", "df3_src", "cd0_src", "dh0_src", "dh1_src", "dh2_src", "dh3_src", "dh4_src", "dh5_src", "dh6_src"};
             final String[] pathKeys = new String[] {
                 UaeOptionKeys.UAE_DRIVE_DF0_PATH,
                 UaeOptionKeys.UAE_DRIVE_DF1_PATH,
@@ -234,7 +238,9 @@ final class ConfigStorage {
                 UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
                 UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
                 UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF4_PATH
+                UaeOptionKeys.UAE_DRIVE_HDF4_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF5_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF6_PATH
             };
             final String[] enabledKeys = new String[] {
                 null,
@@ -246,7 +252,9 @@ final class ConfigStorage {
                 UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
                 UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
                 UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED
+                UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED
             };
 
             for (int i = 0; i < srcKeys.length; i++) {

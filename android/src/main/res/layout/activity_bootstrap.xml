@@ -105,23 +105,42 @@
                     <Button
                         android:id="@+id/iconBtnKick"
                         android:layout_width="wrap_content"
-                        android:layout_height="40dp"
+                        android:layout_height="56dp"
                         style="@style/IconChipSmall"
-                        android:textSize="10sp"
+                        android:textSize="12sp"
                         android:backgroundTint="#5C6BC0"
                         android:text="KS" />
 
-                    <TextView
-                        android:id="@+id/txtKickStatus"
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:layout_marginStart="6dp"
-                        android:text="Kickstart: (not selected)"
-                        android:textSize="11sp"
-                        android:singleLine="true"
-                        android:ellipsize="end"
-                        android:visibility="visible" />
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:id="@+id/txtKickStatus"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="Kickstart: (not selected)"
+                            android:textSize="11sp"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:visibility="visible" />
+
+                        <!-- CD32 Extended ROM status shown inline next to kickstart -->
+                        <TextView
+                            android:id="@+id/txtExtStatusInline"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Ext ROM: (not selected)"
+                            android:textSize="10sp"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:visibility="gone" />
+
+                    </LinearLayout>
 
                 </LinearLayout>
 
@@ -210,14 +229,15 @@
                             android:orientation="vertical" />
                     </ScrollView>
 
-                    <!-- Media actions (vertical, left of Amiga graphic) -->
+                    <!-- Media actions (hidden – drives managed via drives strip) -->
                     <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginStart="4dp"
                         android:layout_marginEnd="4dp"
                         android:gravity="center_horizontal"
-                        android:orientation="vertical">
+                        android:orientation="vertical"
+                        android:visibility="gone">
 
                         <Button
                             android:id="@+id/btnAddDf1"
@@ -265,17 +285,47 @@
                     </LinearLayout>
 
                     <!-- Amiga model image (long-press = config) -->
-                    <ImageView
-                        android:id="@+id/imgAmigaModel"
+                    <LinearLayout
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1.5"
-                        android:scaleType="fitCenter"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:background="?android:attr/selectableItemBackground"
-                        android:contentDescription="Amiga model"
-                        android:src="@drawable/featured_a500" />
+                        android:orientation="vertical">
+
+                        <!-- RAM info shown above the Amiga graphic -->
+                        <TextView
+                            android:id="@+id/txtRamInfo"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text=""
+                            android:textSize="9sp"
+                            android:textColor="?android:attr/textColorSecondary"
+                            android:gravity="center"
+                            android:singleLine="true"
+                            android:ellipsize="end"
+                            android:visibility="visible" />
+
+                        <!-- JIT enable checkbox -->
+                        <CheckBox
+                            android:id="@+id/chkJitEnabled"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="center_horizontal"
+                            android:text="JIT"
+                            android:textSize="9sp" />
+
+                        <ImageView
+                            android:id="@+id/imgAmigaModel"
+                            android:layout_width="match_parent"
+                            android:layout_height="0dp"
+                            android:layout_weight="1"
+                            android:scaleType="fitCenter"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:background="?android:attr/selectableItemBackground"
+                            android:contentDescription="Amiga model"
+                            android:src="@drawable/featured_a500" />
+
+                    </LinearLayout>
 
                 </LinearLayout>
 
@@ -311,7 +361,7 @@
 
                 </HorizontalScrollView>
 
-                <!-- Ext ROM (CD32 only, shown at bottom of media section) -->
+                <!-- Ext ROM (CD32 only, now shown inline next to KS – this section kept for Java compat) -->
                 <LinearLayout
                     android:id="@+id/extRomSection"
                     android:layout_width="match_parent"

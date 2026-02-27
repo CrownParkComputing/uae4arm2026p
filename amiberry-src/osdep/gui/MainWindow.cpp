@@ -7,8 +7,8 @@
  *   – JIT enable tick-box
  *   – RTG enable tick-box
  *   – Chip / Fast / Z3 memory labels (visible when RTG is on)
- *   – 4 Hard-drive slots (2 original + 2 additional)
- *   – Space reserved after HD rows for CD / LHA drives
+ *   – 7 Hard-drive slots (2 original + 5 additional)
+ *   – Spacer + CD / LHA drives after HD rows
  */
 
 #include <algorithm>
@@ -337,22 +337,19 @@ static void rebuild_config_panel()
     if (chkJIT) chkJIT->setSelected(jitOn);
     if (chkRTG) chkRTG->setSelected(rtgOn);
 
-    // Memory labels – visible only when RTG is on
-    if (lblMemTitle)  lblMemTitle->setVisible(rtgOn);
+    // Memory labels – always visible
+    if (lblMemTitle)  lblMemTitle->setVisible(true);
     if (lblChipMem) {
-        lblChipMem->setVisible(rtgOn);
-        if (rtgOn)
-            lblChipMem->setCaption("Chip: " + format_mem(changed_prefs.chipmem.size));
+        lblChipMem->setVisible(true);
+        lblChipMem->setCaption("Chip: " + format_mem(changed_prefs.chipmem.size));
     }
     if (lblFastMem) {
-        lblFastMem->setVisible(rtgOn);
-        if (rtgOn)
-            lblFastMem->setCaption("Fast: " + format_mem(changed_prefs.fastmem[0].size));
+        lblFastMem->setVisible(true);
+        lblFastMem->setCaption("Fast: " + format_mem(changed_prefs.fastmem[0].size));
     }
     if (lblZ3Mem) {
-        lblZ3Mem->setVisible(rtgOn);
-        if (rtgOn)
-            lblZ3Mem->setCaption("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
+        lblZ3Mem->setVisible(true);
+        lblZ3Mem->setCaption("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
     }
 
     // Floppy drives
@@ -441,23 +438,21 @@ static gcn::Container* create_config_panel()
     panel->add(chkRTG, x + 250, y);
     y += ROW_H + PANEL_MARGIN;
 
-    // ── Section: Memory display (visible when RTG is enabled) ─────────────
-    bool rtgOn = (changed_prefs.rtgboards[0].rtgmem_size > 0);
-
+    // ── Section: Memory display (always visible) ──────────────────────────
     lblMemTitle = new gcn::Label("Memory:");
-    lblMemTitle->setVisible(rtgOn);
+    lblMemTitle->setVisible(true);
     panel->add(lblMemTitle, x, y);
 
     lblChipMem = new gcn::Label("Chip: " + format_mem(changed_prefs.chipmem.size));
-    lblChipMem->setVisible(rtgOn);
+    lblChipMem->setVisible(true);
     panel->add(lblChipMem, x + 70, y);
 
     lblFastMem = new gcn::Label("Fast: " + format_mem(changed_prefs.fastmem[0].size));
-    lblFastMem->setVisible(rtgOn);
+    lblFastMem->setVisible(true);
     panel->add(lblFastMem, x + 200, y);
 
     lblZ3Mem = new gcn::Label("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
-    lblZ3Mem->setVisible(rtgOn);
+    lblZ3Mem->setVisible(true);
     panel->add(lblZ3Mem, x + 330, y);
 
     y += ROW_H + PANEL_MARGIN;
@@ -769,6 +764,18 @@ void run_gui()
                 event.key.keysym.sym == SDLK_ESCAPE) {
                 gui_running = false;
                 break;
+            }
+            if (event.type == SDL_WINDOWEVENT) {
+                if (event.window.event == SDL_WINDOWEVENT_MINIMIZED) {
+                    // Window minimised – do not push to guisan; skip rendering until restored.
+                    continue;
+                }
+                if (event.window.event == SDL_WINDOWEVENT_RESTORED ||
+                    event.window.event == SDL_WINDOWEVENT_SHOWN) {
+                    // Force a redraw on restore.
+                    rebuild_config_panel();
+                }
+                // Fall through to push other window events to guisan input.
             }
             gui_input->pushInput(event);
         }

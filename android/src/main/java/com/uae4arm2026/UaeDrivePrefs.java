@@ -27,19 +27,25 @@ final class UaeDrivePrefs {
         final boolean dh2Configured;
         final boolean dh3Configured;
         final boolean dh4Configured;
+        final boolean dh5Configured;
+        final boolean dh6Configured;
 
         HardDriveConfig(
             String hdf0, String dir0,
             String hdf1, String dir1,
             String hdf2, String dir2,
             String hdf3, String dir3,
-            String hdf4, String dir4
+            String hdf4, String dir4,
+            String hdf5, String dir5,
+            String hdf6, String dir6
         ) {
             dh0Configured = !safeTrim(hdf0).isEmpty() || !safeTrim(dir0).isEmpty();
             dh1Configured = !safeTrim(hdf1).isEmpty() || !safeTrim(dir1).isEmpty();
             dh2Configured = !safeTrim(hdf2).isEmpty() || !safeTrim(dir2).isEmpty();
             dh3Configured = !safeTrim(hdf3).isEmpty() || !safeTrim(dir3).isEmpty();
             dh4Configured = !safeTrim(hdf4).isEmpty() || !safeTrim(dir4).isEmpty();
+            dh5Configured = !safeTrim(hdf5).isEmpty() || !safeTrim(dir5).isEmpty();
+            dh6Configured = !safeTrim(hdf6).isEmpty() || !safeTrim(dir6).isEmpty();
         }
     }
 
@@ -54,7 +60,7 @@ final class UaeDrivePrefs {
     }
 
     static HardDriveConfig readHardDriveConfig(SharedPreferences prefs) {
-        if (prefs == null) return new HardDriveConfig("", "", "", "", "", "", "", "", "", "");
+        if (prefs == null) return new HardDriveConfig("", "", "", "", "", "", "", "", "", "", "", "", "", "");
         return new HardDriveConfig(
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR0_PATH, ""),
@@ -65,7 +71,11 @@ final class UaeDrivePrefs {
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF3_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR3_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF4_PATH, ""),
-            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR4_PATH, "")
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR4_PATH, ""),
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF5_PATH, ""),
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, ""),
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF6_PATH, ""),
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, "")
         );
     }
 

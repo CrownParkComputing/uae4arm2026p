@@ -177,6 +177,20 @@ public final class UaeOptionKeys {
     public static final String UAE_DRIVE_DIR4_READONLY = "uae_drive_dir4_readonly"; // boolean
     public static final String UAE_DRIVE_DIR4_BOOTPRI = "uae_drive_dir4_bootpri"; // int
 
+    public static final String UAE_DRIVE_DIR5_ENABLED = "uae_drive_dir5_enabled"; // boolean
+    public static final String UAE_DRIVE_DIR5_PATH = "uae_drive_dir5_path"; // string absolute path
+    public static final String UAE_DRIVE_DIR5_DEVNAME = "uae_drive_dir5_devname"; // string (e.g. DH5)
+    public static final String UAE_DRIVE_DIR5_VOLNAME = "uae_drive_dir5_volname"; // string
+    public static final String UAE_DRIVE_DIR5_READONLY = "uae_drive_dir5_readonly"; // boolean
+    public static final String UAE_DRIVE_DIR5_BOOTPRI = "uae_drive_dir5_bootpri"; // int
+
+    public static final String UAE_DRIVE_DIR6_ENABLED = "uae_drive_dir6_enabled"; // boolean
+    public static final String UAE_DRIVE_DIR6_PATH = "uae_drive_dir6_path"; // string absolute path
+    public static final String UAE_DRIVE_DIR6_DEVNAME = "uae_drive_dir6_devname"; // string (e.g. DH6)
+    public static final String UAE_DRIVE_DIR6_VOLNAME = "uae_drive_dir6_volname"; // string
+    public static final String UAE_DRIVE_DIR6_READONLY = "uae_drive_dir6_readonly"; // boolean
+    public static final String UAE_DRIVE_DIR6_BOOTPRI = "uae_drive_dir6_bootpri"; // int
+
     // Hardfile (HDF) mount (hardfile2). This is implemented as a simple RDB-style mount.
     public static final String UAE_DRIVE_HDF0_ENABLED = "uae_drive_hdf0_enabled"; // boolean
     public static final String UAE_DRIVE_HDF0_PATH = "uae_drive_hdf0_path"; // string absolute path
@@ -202,6 +216,16 @@ public final class UaeOptionKeys {
     public static final String UAE_DRIVE_HDF4_PATH = "uae_drive_hdf4_path"; // string absolute path
     public static final String UAE_DRIVE_HDF4_DEVNAME = "uae_drive_hdf4_devname"; // string (e.g. DH4)
     public static final String UAE_DRIVE_HDF4_READONLY = "uae_drive_hdf4_readonly"; // boolean
+
+    public static final String UAE_DRIVE_HDF5_ENABLED = "uae_drive_hdf5_enabled"; // boolean
+    public static final String UAE_DRIVE_HDF5_PATH = "uae_drive_hdf5_path"; // string absolute path
+    public static final String UAE_DRIVE_HDF5_DEVNAME = "uae_drive_hdf5_devname"; // string (e.g. DH5)
+    public static final String UAE_DRIVE_HDF5_READONLY = "uae_drive_hdf5_readonly"; // boolean
+
+    public static final String UAE_DRIVE_HDF6_ENABLED = "uae_drive_hdf6_enabled"; // boolean
+    public static final String UAE_DRIVE_HDF6_PATH = "uae_drive_hdf6_path"; // string absolute path
+    public static final String UAE_DRIVE_HDF6_DEVNAME = "uae_drive_hdf6_devname"; // string (e.g. DH6)
+    public static final String UAE_DRIVE_HDF6_READONLY = "uae_drive_hdf6_readonly"; // boolean
 
     // Optional filesystem module for non-RDB DOS\x hardfiles (e.g. FastFileSystem).
     // Stored as an absolute path in app-internal storage so the core can load it.
