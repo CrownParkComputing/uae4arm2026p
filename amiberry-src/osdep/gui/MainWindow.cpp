@@ -4,11 +4,12 @@
  * Implements the SDL2/guisan-based settings GUI, including:
  *   – Bigger kickstart ROM icon button
  *   – CD32 extended-ROM info shown below kickstart
+ *   – Chip / Fast / Z3 memory labels (Z3 visible only when RTG is on, placed under CD32 section)
  *   – JIT enable tick-box
- *   – RTG enable tick-box
- *   – Chip / Fast / Z3 memory labels (visible when RTG is on)
+ *   – RTG enable tick-box (Z3 RAM visibility is gated by RTG)
  *   – 7 Hard-drive slots (2 original + 5 additional)
  *   – Spacer + CD / LHA drives after HD rows
+ *   – Progress bar shown while mounting a CD image
  */
 
 #include <algorithm>
@@ -107,9 +108,10 @@ static gcn::Button* btnDF[4];
 static gcn::Label*  lblDFPath[4];
 
 // CD / LHA slot (space reserved below HD rows)
-static gcn::Label*  lblCDTitle  = nullptr;
-static gcn::Label*  lblCDPath   = nullptr;
-static gcn::Button* btnCD       = nullptr;
+static gcn::Label*       lblCDTitle  = nullptr;
+static gcn::Label*       lblCDPath   = nullptr;
+static gcn::Button*      btnCD       = nullptr;
+static gcn::ProgressBar* pbarCD      = nullptr;
 
 // ── Action-listener forward declarations ─────────────────────────────────────
 class KickstartListener;
@@ -268,10 +270,13 @@ public:
                           : get_cdrom_path();
         std::string sel = SelectFile("Select CD Image", cur, cdfile_filter);
         if (!sel.empty()) {
+            if (pbarCD) { pbarCD->setValue(0); pbarCD->setVisible(true); }
             strncpy(changed_prefs.cdslots[0].name, sel.c_str(), MAX_DPATH - 1);
             changed_prefs.cdslots[0].inuse = true;
             changed_prefs.cdslots[0].type  = SCSI_UNIT_DEFAULT;
+            if (pbarCD) { pbarCD->setValue(100); }
             rebuild_config_panel();
+            if (pbarCD) { pbarCD->setVisible(false); }
         }
     }
 };
@@ -348,7 +353,7 @@ static void rebuild_config_panel()
         lblFastMem->setCaption("Fast: " + format_mem(changed_prefs.fastmem[0].size));
     }
     if (lblZ3Mem) {
-        lblZ3Mem->setVisible(true);
+        lblZ3Mem->setVisible(rtgOn);
         lblZ3Mem->setCaption("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
     }
 
@@ -425,36 +430,33 @@ static gcn::Container* create_config_panel()
     panel->add(lblExtRomPath, x + 80 + PANEL_MARGIN, y + (ROW_H - 18) / 2);
     y += ROW_H + PANEL_MARGIN;
 
+    // ── Section: Memory display (under CD32) ──────────────────────────────
+    lblMemTitle = new gcn::Label("Memory:");
+    panel->add(lblMemTitle, x, y);
+
+    lblChipMem = new gcn::Label("Chip: " + format_mem(changed_prefs.chipmem.size));
+    panel->add(lblChipMem, x + 70, y);
+
+    lblFastMem = new gcn::Label("Fast: " + format_mem(changed_prefs.fastmem[0].size));
+    panel->add(lblFastMem, x + 200, y);
+
+    bool rtgInitOn = (changed_prefs.rtgboards[0].rtgmem_size > 0);
+    lblZ3Mem = new gcn::Label("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
+    lblZ3Mem->setVisible(rtgInitOn);
+    panel->add(lblZ3Mem, x + 330, y);
+
+    y += ROW_H + PANEL_MARGIN;
+
     // ── Section: JIT and RTG checkboxes ───────────────────────────────────
     chkJIT = new gcn::CheckBox("Enable JIT Compiler", changed_prefs.cachesize > 0);
     jitListener = new JITListener();
     chkJIT->addActionListener(jitListener);
     panel->add(chkJIT, x, y);
 
-    chkRTG = new gcn::CheckBox("Enable RTG (Picasso96)",
-                                changed_prefs.rtgboards[0].rtgmem_size > 0);
+    chkRTG = new gcn::CheckBox("Enable RTG (Picasso96)", rtgInitOn);
     rtgListener = new RTGListener();
     chkRTG->addActionListener(rtgListener);
     panel->add(chkRTG, x + 250, y);
-    y += ROW_H + PANEL_MARGIN;
-
-    // ── Section: Memory display (always visible) ──────────────────────────
-    lblMemTitle = new gcn::Label("Memory:");
-    lblMemTitle->setVisible(true);
-    panel->add(lblMemTitle, x, y);
-
-    lblChipMem = new gcn::Label("Chip: " + format_mem(changed_prefs.chipmem.size));
-    lblChipMem->setVisible(true);
-    panel->add(lblChipMem, x + 70, y);
-
-    lblFastMem = new gcn::Label("Fast: " + format_mem(changed_prefs.fastmem[0].size));
-    lblFastMem->setVisible(true);
-    panel->add(lblFastMem, x + 200, y);
-
-    lblZ3Mem = new gcn::Label("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
-    lblZ3Mem->setVisible(true);
-    panel->add(lblZ3Mem, x + 330, y);
-
     y += ROW_H + PANEL_MARGIN;
 
     // Separator
@@ -534,6 +536,14 @@ static gcn::Container* create_config_panel()
     lblCDPath = new gcn::Label(short_path(cdPath));
     lblCDPath->setSize(PANEL_WIDTH - 44 - PANEL_MARGIN * 2, ROW_H);
     panel->add(lblCDPath, x + 44 + PANEL_MARGIN, y + (ROW_H - 18) / 2);
+
+    y += ROW_H + 4;
+
+    pbarCD = new gcn::ProgressBar(0, 100, 0);
+    pbarCD->setCaption("Mounting CD Image...");
+    pbarCD->setSize(PANEL_WIDTH - PANEL_MARGIN * 2, ROW_H);
+    pbarCD->setVisible(false);
+    panel->add(pbarCD, x, y);
 
     panelConfig = panel;
     return panel;
@@ -725,6 +735,7 @@ void gui_widgets_halt()
     lblMemTitle    = lblChipMem    = lblFastMem     = lblZ3Mem      = nullptr;
     lblDrivesTitle = lblHDTitle    = lblCDTitle     = lblCDPath     = nullptr;
     btnKickstart   = btnCD         = nullptr;
+    pbarCD         = nullptr;
     for (int i = 0; i < MAX_HD_DEVICES; ++i) { lblHD[i] = nullptr; btnHD[i] = nullptr; lblHDPath[i] = nullptr; }
     for (int i = 0; i < 4; ++i)            { lblDF[i] = nullptr; btnDF[i] = nullptr; lblDFPath[i] = nullptr; }
 
