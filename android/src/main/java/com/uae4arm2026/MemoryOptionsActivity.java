@@ -53,8 +53,8 @@ public class MemoryOptionsActivity extends Activity {
     private static final String[] BOGO_LABELS = {"None", "512 KB", "1 MB", "1.5 MB", "1.8 MB"};
 
     // fastmem stored as bytes. We apply it as fastmem_size_k (<1MB) or fastmem_size (>=1MB).
-    private static final int[] FAST_BYTES = {0, 64 * 1024, 128 * 1024, 256 * 1024, 512 * 1024, 1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
-    private static final String[] FAST_LABELS = {"None", "64 KB", "128 KB", "256 KB", "512 KB", "1 MB", "2 MB", "4 MB", "8 MB"};
+    private static final int[] FAST_BYTES = {0, 1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
+    private static final String[] FAST_LABELS = {"None", "1 MB", "2 MB", "4 MB", "8 MB"};
 
     private static final int[] Z3FAST_MB = {0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
     private static final String[] Z3FAST_LABELS = {"None", "1 MB", "2 MB", "4 MB", "8 MB", "16 MB", "32 MB", "64 MB", "128 MB", "256 MB", "512 MB", "1 GB"};
@@ -134,6 +134,12 @@ public class MemoryOptionsActivity extends Activity {
         int a3000 = p.getInt(UaeOptionKeys.UAE_MEM_A3000MEM_SIZE_MB, 0);
         int mbres = p.getInt(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB, 0);
         String z3map = p.getString(UaeOptionKeys.UAE_MEM_Z3MAPPING, "auto");
+
+        // If JIT is enabled, ensure at least 64 MB of Z3 fast RAM for 32-bit addressing.
+        boolean jitEnabled = p.getBoolean(UaeOptionKeys.UAE_JIT_ENABLED, false);
+        if (jitEnabled && z3 < 64) {
+            z3 = 64;
+        }
 
         int rtgSize = p.getInt(UaeOptionKeys.UAE_GFXCARD_SIZE_MB, 0);
         String rtgType = p.getString(UaeOptionKeys.UAE_GFXCARD_TYPE, null);

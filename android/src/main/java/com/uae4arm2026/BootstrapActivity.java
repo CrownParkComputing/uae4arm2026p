@@ -7238,10 +7238,18 @@ public class BootstrapActivity extends Activity {
         if (mChkJitEnabled != null) {
             mChkJitEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 try {
-                    getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, isChecked)
-                        .apply();
+                    SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                    SharedPreferences.Editor ed = p.edit();
+                    ed.putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, isChecked);
+                    if (isChecked) {
+                        // JIT requires 32-bit addressing; ensure at least 64 MB of Z3 fast RAM.
+                        int z3 = p.getInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 0);
+                        if (z3 < 64) {
+                            ed.putInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 64);
+                        }
+                    }
+                    ed.apply();
+                    refreshStatus();
                 } catch (Throwable ignored) {}
             });
         }

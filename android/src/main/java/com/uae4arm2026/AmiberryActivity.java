@@ -2536,16 +2536,54 @@ public class AmiberryActivity extends SDLActivity {
         String badge = "DBG";
         if (info != null) {
             String lc = info.toLowerCase(java.util.Locale.ROOT);
+            // Try to extract the actual GL renderer name for a friendly badge.
+            String glRenderer = extractLineValue(info, "gl.renderer=");
             if (lc.contains("build.use_vulkan=1")) {
-                badge = "VK";
-            } else if (lc.contains("gl.renderer=") && !lc.contains("gl.renderer=n/a")) {
-                badge = "GL";
+                // For Vulkan builds, try to identify driver from renderer string.
+                String driverName = identifyDriverName(glRenderer);
+                badge = (driverName != null) ? driverName : "VK";
+            } else if (glRenderer != null && !glRenderer.equalsIgnoreCase("n/a") && !glRenderer.isEmpty()) {
+                String driverName = identifyDriverName(glRenderer);
+                badge = (driverName != null) ? driverName : "GL";
             } else if (lc.contains("gfx_api=sdl2")) {
                 badge = "SDL";
             }
         }
         mRendererIndicator.setText(badge);
         mRendererIndicator.setVisibility(View.VISIBLE);
+    }
+
+    /** Extract the value after a "key=" prefix from a multi-line debug string. */
+    private static String extractLineValue(String info, String prefix) {
+        if (info == null) return null;
+        for (String line : info.split("\n")) {
+            if (line.startsWith(prefix)) {
+                String val = line.substring(prefix.length()).trim();
+                return val.isEmpty() ? null : val;
+            }
+        }
+        return null;
+    }
+
+    /** Return a short friendly driver name from a GL renderer string, or null if unknown. */
+    private static String identifyDriverName(String renderer) {
+        if (renderer == null || renderer.isEmpty()) return null;
+        String lc = renderer.toLowerCase(java.util.Locale.ROOT);
+        if (lc.contains("turnip")) return "Turnip";
+        if (lc.contains("adreno")) return "Adreno";
+        if (lc.contains("qualcomm")) return "Qualcomm";
+        if (lc.contains("mali")) return "Mali";
+        if (lc.contains("powervr") || lc.contains("sgx")) return "PVR";
+        if (lc.contains("tegra")) return "Tegra";
+        if (lc.contains("apple")) return "Apple";
+        if (lc.contains("mesa")) return "Mesa";
+        if (lc.contains("intel")) return "Intel";
+        if (lc.contains("nvidia")) return "NVIDIA";
+        if (lc.contains("amd") || lc.contains("radeon")) return "AMD";
+        // Fallback: use first word of renderer if it looks reasonable (<=8 chars).
+        String[] parts = renderer.trim().split("[ \\t]+");
+        if (parts.length > 0 && parts[0].length() <= 8) return parts[0];
+        return null;
     }
 
     private void showRendererInfoDialog() {

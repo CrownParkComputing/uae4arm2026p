@@ -347,8 +347,8 @@ public class SoundOptionsActivity extends Activity {
         boolean floppySound = p.getBoolean(UaeOptionKeys.UAE_FLOPPY_SOUND_ENABLED, true);
         mFloppySound.setChecked(floppySound);
 
-        int floppyEmptyAtt = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_EMPTY, 33);
-        int floppyDiskAtt = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, 33);
+        int floppyEmptyAtt = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_EMPTY, 80);
+        int floppyDiskAtt = p.getInt(UaeOptionKeys.UAE_FLOPPY_SOUNDVOL_DISK, 80);
 
         int floppyEmptyPct = 100 - floppyEmptyAtt;
         int floppyDiskPct = 100 - floppyDiskAtt;

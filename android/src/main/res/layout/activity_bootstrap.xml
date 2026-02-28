@@ -105,7 +105,7 @@
                     <Button
                         android:id="@+id/iconBtnKick"
                         android:layout_width="wrap_content"
-                        android:layout_height="56dp"
+                        android:layout_height="wrap_content"
                         style="@style/IconChipSmall"
                         android:textSize="12sp"
                         android:backgroundTint="#5C6BC0"
