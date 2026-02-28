@@ -2,14 +2,14 @@
  * uae4arm_2026 GUI – MainWindow.cpp
  *
  * Implements the SDL2/guisan-based settings GUI, including:
- *   – Bigger kickstart ROM icon button
- *   – CD32 extended-ROM info shown below kickstart
- *   – Chip / Fast / Z3 memory labels (Z3 visible only when RTG is on, placed under CD32 section)
+ *   – Kickstart ROM icon button
+ *   – RAM Presets: Chip (512K/1MB/2MB), Z2 Fast (2MB/4MB/8MB), Z3 (Off/8MB)
  *   – JIT enable tick-box
- *   – RTG enable tick-box (Z3 RAM visibility is gated by RTG)
- *   – 7 Hard-drive slots (2 original + 5 additional)
- *   – Spacer + CD / LHA drives after HD rows
- *   – Progress bar shown while mounting a CD image
+ *   – RTG enable tick-box
+ *   – 4 Hard-drive slots
+ *   – Floppy drives (DF0-DF3)
+ *   – CD drive + progress bar
+ *   Everything fits on one screen without scrolling.
  */
 
 #include <algorithm>
@@ -84,20 +84,30 @@ static gcn::SDLInput*     gui_input    = nullptr;
 // Config panel widgets
 static gcn::Container*  panelConfig   = nullptr;
 static gcn::Label*      lblKickTitle  = nullptr;
-static gcn::Button*     btnKickstart  = nullptr;   // big kickstart icon-button
+static gcn::Button*     btnKickstart  = nullptr;   // kickstart icon-button
 static gcn::Label*      lblKickPath   = nullptr;
-static gcn::Label*      lblExtRomTitle = nullptr;  // CD32 extended ROM label (hidden when not CD32)
-static gcn::Label*      lblExtRomPath  = nullptr;
 static gcn::CheckBox*   chkJIT         = nullptr;
 static gcn::CheckBox*   chkRTG         = nullptr;
-static gcn::Label*      lblMemTitle    = nullptr;
-static gcn::Label*      lblChipMem     = nullptr;
-static gcn::Label*      lblFastMem     = nullptr;
-static gcn::Label*      lblZ3Mem       = nullptr;
+
+// RAM presets section
+static gcn::Label*   lblRAMPresetsTitle = nullptr;
+
+// Chip RAM: current-value label + 3 preset buttons (512K, 1MB, 2MB)
+static gcn::Label*   lblChipMem  = nullptr;
+static gcn::Button*  btnChip[3]  = {};
+
+// Z2 Fast RAM: current-value label + 3 preset buttons (2MB, 4MB, 8MB)
+static gcn::Label*   lblFastMem  = nullptr;
+static gcn::Button*  btnZ2[3]    = {};
+
+// Z3 RAM: current-value label + 2 preset buttons (Off, 8MB)
+static gcn::Label*   lblZ3Mem    = nullptr;
+static gcn::Button*  btnZ3[2]    = {};
+
 static gcn::Label*      lblDrivesTitle = nullptr;
 static gcn::Label*      lblHDTitle     = nullptr;
 
-// Hard-drive rows: 4 total (2 original + 2 new) – count comes from MAX_HD_DEVICES in gui_handling.h
+// Hard-drive rows: count comes from MAX_HD_DEVICES in gui_handling.h
 static gcn::Label*  lblHD[MAX_HD_DEVICES];
 static gcn::Button* btnHD[MAX_HD_DEVICES];
 static gcn::Label*  lblHDPath[MAX_HD_DEVICES];
@@ -115,17 +125,21 @@ static gcn::ProgressBar* pbarCD      = nullptr;
 
 // ── Action-listener forward declarations ─────────────────────────────────────
 class KickstartListener;
-class ExtRomListener;
 class JITListener;
 class RTGListener;
+class ChipMemListener;
+class Z2MemListener;
+class Z3MemListener;
 class HDListener;
 class CDListener;
 class DFListener;
 
 static KickstartListener* kickListener = nullptr;
-static ExtRomListener*    extRomListener = nullptr;
 static JITListener*       jitListener  = nullptr;
 static RTGListener*       rtgListener  = nullptr;
+static ChipMemListener*   chipListener[3] = {};
+static Z2MemListener*     z2Listener[3]   = {};
+static Z3MemListener*     z3Listener[2]   = {};
 static HDListener*        hdListener[MAX_HD_DEVICES] = {};
 static CDListener*        cdListener  = nullptr;
 static DFListener*        dfListener[4] = {};
@@ -199,20 +213,6 @@ public:
     }
 };
 
-class ExtRomListener : public gcn::ActionListener {
-public:
-    void action(const gcn::ActionEvent&) override {
-        std::string cur = changed_prefs.romextfile[0]
-                          ? std::string(changed_prefs.romextfile)
-                          : get_rom_path();
-        std::string sel = SelectFile("Select CD32 Extended ROM", cur, romfile_filter);
-        if (!sel.empty()) {
-            strncpy(changed_prefs.romextfile, sel.c_str(), MAX_DPATH - 1);
-            rebuild_config_panel();
-        }
-    }
-};
-
 class JITListener : public gcn::ActionListener {
 public:
     void action(const gcn::ActionEvent&) override {
@@ -236,6 +236,39 @@ public:
         }
         rebuild_config_panel();
     }
+};
+
+class ChipMemListener : public gcn::ActionListener {
+public:
+    explicit ChipMemListener(uae_u32 sz) : mSize(sz) {}
+    void action(const gcn::ActionEvent&) override {
+        changed_prefs.chipmem.size = mSize;
+        rebuild_config_panel();
+    }
+private:
+    uae_u32 mSize;
+};
+
+class Z2MemListener : public gcn::ActionListener {
+public:
+    explicit Z2MemListener(uae_u32 sz) : mSize(sz) {}
+    void action(const gcn::ActionEvent&) override {
+        changed_prefs.fastmem[0].size = mSize;
+        rebuild_config_panel();
+    }
+private:
+    uae_u32 mSize;
+};
+
+class Z3MemListener : public gcn::ActionListener {
+public:
+    explicit Z3MemListener(uae_u32 sz) : mSize(sz) {}
+    void action(const gcn::ActionEvent&) override {
+        changed_prefs.z3fastmem[0].size = mSize;
+        rebuild_config_panel();
+    }
+private:
+    uae_u32 mSize;
 };
 
 class HDListener : public gcn::ActionListener {
@@ -309,11 +342,10 @@ static CategoryListener* catListeners[MAX_CATEGORIES] = {};
 
 // ── Config panel layout constants ─────────────────────────────────────────────
 static const int PANEL_MARGIN      = 10;
-static const int KICKSTART_BTN_W   = 120;  // bigger kickstart icon button
+static const int KICKSTART_BTN_W   = 120;  // kickstart icon button
 static const int KICKSTART_BTN_H   = 60;
 static const int ROW_H             = 28;
 static const int LABEL_W           = 100;
-static const int CD_SPACER_H       = ROW_H;   // space reserved after HD rows for CD / LHA
 static const int PATH_LABEL_W      = PANEL_WIDTH - KICKSTART_BTN_W - LABEL_W - PANEL_MARGIN * 4;
 
 // ── rebuild_config_panel ─────────────────────────────────────────────────────
@@ -322,40 +354,24 @@ static void rebuild_config_panel()
 {
     if (!panelConfig) return;
 
-    bool isCD32  = changed_prefs.cs_cd32cd;
-    bool rtgOn   = (changed_prefs.rtgboards[0].rtgmem_size > 0);
     bool jitOn   = (changed_prefs.cachesize > 0);
+    bool rtgOn   = (changed_prefs.rtgboards[0].rtgmem_size > 0);
 
     // Kickstart ROM path
     if (lblKickPath)
         lblKickPath->setCaption(short_path(changed_prefs.romfile));
 
-    // CD32 extended ROM – show only when CD32 is active
-    if (lblExtRomTitle && lblExtRomPath) {
-        lblExtRomTitle->setVisible(isCD32);
-        lblExtRomPath->setVisible(isCD32);
-        if (isCD32)
-            lblExtRomPath->setCaption(short_path(changed_prefs.romextfile));
-    }
-
     // JIT / RTG checkboxes
     if (chkJIT) chkJIT->setSelected(jitOn);
     if (chkRTG) chkRTG->setSelected(rtgOn);
 
-    // Memory labels – always visible
-    if (lblMemTitle)  lblMemTitle->setVisible(true);
-    if (lblChipMem) {
-        lblChipMem->setVisible(true);
+    // Memory current-value labels
+    if (lblChipMem)
         lblChipMem->setCaption("Chip: " + format_mem(changed_prefs.chipmem.size));
-    }
-    if (lblFastMem) {
-        lblFastMem->setVisible(true);
-        lblFastMem->setCaption("Fast: " + format_mem(changed_prefs.fastmem[0].size));
-    }
-    if (lblZ3Mem) {
-        lblZ3Mem->setVisible(rtgOn);
+    if (lblFastMem)
+        lblFastMem->setCaption("Z2: " + format_mem(changed_prefs.fastmem[0].size));
+    if (lblZ3Mem)
         lblZ3Mem->setCaption("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
-    }
 
     // Floppy drives
     for (int i = 0; i < 4; ++i) {
@@ -381,6 +397,18 @@ static void rebuild_config_panel()
 }
 
 // ── create_config_panel ───────────────────────────────────────────────────────
+// Preset RAM size tables (file-scope constants, shared by create and rebuild)
+struct RamPreset { const char* lbl; uae_u32 sz; };
+static const RamPreset kChipSizes[3] = {
+    {"512K", 512 * 1024}, {"1MB", 1024 * 1024}, {"2MB", 2 * 1024 * 1024}
+};
+static const RamPreset kZ2Sizes[3] = {
+    {"2MB", 2 * 1024 * 1024}, {"4MB", 4 * 1024 * 1024}, {"8MB", 8 * 1024 * 1024}
+};
+static const RamPreset kZ3Sizes[2] = {
+    {"Off", 0}, {"8MB", 8 * 1024 * 1024}
+};
+
 static gcn::Container* create_config_panel()
 {
     auto* panel = new gcn::Container();
@@ -410,41 +438,57 @@ static gcn::Container* create_config_panel()
 
     y += KICKSTART_BTN_H + PANEL_MARGIN;
 
-    // ── Section: CD32 Extended ROM (visible only when CD32 config active) ─
-    lblExtRomTitle = new gcn::Label("Extended ROM (CD32):");
-    lblExtRomTitle->setVisible(changed_prefs.cs_cd32cd);
-    panel->add(lblExtRomTitle, x, y);
+    // ── Section: RAM Presets ───────────────────────────────────────────────
+    lblRAMPresetsTitle = new gcn::Label("RAM Presets:");
+    panel->add(lblRAMPresetsTitle, x, y);
     y += 22;
 
-    // Extended ROM browse button + path
-    auto* btnExt = new gcn::Button("Browse");
-    btnExt->setSize(80, ROW_H);
-    extRomListener = new ExtRomListener();
-    btnExt->addActionListener(extRomListener);
-    btnExt->setVisible(changed_prefs.cs_cd32cd);
-    panel->add(btnExt, x, y);
-
-    lblExtRomPath = new gcn::Label(short_path(changed_prefs.romextfile));
-    lblExtRomPath->setSize(PANEL_WIDTH - 80 - PANEL_MARGIN * 3, ROW_H);
-    lblExtRomPath->setVisible(changed_prefs.cs_cd32cd);
-    panel->add(lblExtRomPath, x + 80 + PANEL_MARGIN, y + (ROW_H - 18) / 2);
-    y += ROW_H + PANEL_MARGIN;
-
-    // ── Section: Memory display (under CD32) ──────────────────────────────
-    lblMemTitle = new gcn::Label("Memory:");
-    panel->add(lblMemTitle, x, y);
-
+    // Row A: Chip RAM current value + preset buttons (512K / 1MB / 2MB)
     lblChipMem = new gcn::Label("Chip: " + format_mem(changed_prefs.chipmem.size));
-    panel->add(lblChipMem, x + 70, y);
+    lblChipMem->setSize(100, ROW_H);
+    panel->add(lblChipMem, x, y + (ROW_H - 18) / 2);
 
-    lblFastMem = new gcn::Label("Fast: " + format_mem(changed_prefs.fastmem[0].size));
-    panel->add(lblFastMem, x + 200, y);
+    int bx = x + 110;
+    for (int i = 0; i < 3; ++i) {
+        btnChip[i] = new gcn::Button(kChipSizes[i].lbl);
+        btnChip[i]->setSize(52, ROW_H);
+        chipListener[i] = new ChipMemListener(kChipSizes[i].sz);
+        btnChip[i]->addActionListener(chipListener[i]);
+        panel->add(btnChip[i], bx, y);
+        bx += 56;
+    }
+    y += ROW_H + 4;
 
-    bool rtgInitOn = (changed_prefs.rtgboards[0].rtgmem_size > 0);
+    // Row B: Z2 Fast RAM label + presets (2MB / 4MB / 8MB)
+    //        + Z3 RAM label + presets (Off / 8MB)
+    lblFastMem = new gcn::Label("Z2: " + format_mem(changed_prefs.fastmem[0].size));
+    lblFastMem->setSize(90, ROW_H);
+    panel->add(lblFastMem, x, y + (ROW_H - 18) / 2);
+
+    bx = x + 100;
+    for (int i = 0; i < 3; ++i) {
+        btnZ2[i] = new gcn::Button(kZ2Sizes[i].lbl);
+        btnZ2[i]->setSize(52, ROW_H);
+        z2Listener[i] = new Z2MemListener(kZ2Sizes[i].sz);
+        btnZ2[i]->addActionListener(z2Listener[i]);
+        panel->add(btnZ2[i], bx, y);
+        bx += 56;
+    }
+
+    int z3x = bx + 10;
     lblZ3Mem = new gcn::Label("Z3: " + format_mem(changed_prefs.z3fastmem[0].size));
-    lblZ3Mem->setVisible(rtgInitOn);
-    panel->add(lblZ3Mem, x + 330, y);
+    lblZ3Mem->setSize(80, ROW_H);
+    panel->add(lblZ3Mem, z3x, y + (ROW_H - 18) / 2);
 
+    int z3bx = z3x + 90;
+    for (int i = 0; i < 2; ++i) {
+        btnZ3[i] = new gcn::Button(kZ3Sizes[i].lbl);
+        btnZ3[i]->setSize(52, ROW_H);
+        z3Listener[i] = new Z3MemListener(kZ3Sizes[i].sz);
+        btnZ3[i]->addActionListener(z3Listener[i]);
+        panel->add(btnZ3[i], z3bx, y);
+        z3bx += 56;
+    }
     y += ROW_H + PANEL_MARGIN;
 
     // ── Section: JIT and RTG checkboxes ───────────────────────────────────
@@ -453,6 +497,7 @@ static gcn::Container* create_config_panel()
     chkJIT->addActionListener(jitListener);
     panel->add(chkJIT, x, y);
 
+    bool rtgInitOn = (changed_prefs.rtgboards[0].rtgmem_size > 0);
     chkRTG = new gcn::CheckBox("Enable RTG (Picasso96)", rtgInitOn);
     rtgListener = new RTGListener();
     chkRTG->addActionListener(rtgListener);
@@ -489,7 +534,7 @@ static gcn::Container* create_config_panel()
 
     y += 4;
 
-    // ── Section: Hard Drives (4 slots: 2 original + 2 new) ────────────────
+    // ── Section: Hard Drives (4 slots) ────────────────────────────────────
     lblHDTitle = new gcn::Label("Hard Drives:");
     panel->add(lblHDTitle, x, y);
     y += 22;
@@ -517,10 +562,7 @@ static gcn::Container* create_config_panel()
         y += ROW_H + 4;
     }
 
-    // Spacer after HD rows (reserved for CD / LHA drives)
-    y += CD_SPACER_H;
-
-    // ── Section: CD Drive (space reserved below HD) ────────────────────────
+    // ── Section: CD Drive ─────────────────────────────────────────────────
     lblCDTitle = new gcn::Label("CD Drive:");
     panel->add(lblCDTitle, x, y);
     y += 22;
@@ -718,10 +760,12 @@ void gui_widgets_halt()
 {
     // Listeners
     delete kickListener;   kickListener   = nullptr;
-    delete extRomListener; extRomListener = nullptr;
     delete jitListener;    jitListener    = nullptr;
     delete rtgListener;    rtgListener    = nullptr;
     delete cdListener;     cdListener     = nullptr;
+    for (int i = 0; i < 3; ++i) { delete chipListener[i]; chipListener[i] = nullptr; }
+    for (int i = 0; i < 3; ++i) { delete z2Listener[i];   z2Listener[i]   = nullptr; }
+    for (int i = 0; i < 2; ++i) { delete z3Listener[i];   z3Listener[i]   = nullptr; }
     for (int i = 0; i < MAX_HD_DEVICES; ++i) { delete hdListener[i]; hdListener[i] = nullptr; }
     for (int i = 0; i < 4; ++i)            { delete dfListener[i]; dfListener[i] = nullptr; }
     for (int i = 0; i < num_categories; ++i) {
@@ -730,9 +774,12 @@ void gui_widgets_halt()
 
     // Null widget pointers (guisan owns the object tree; deleting root frees all)
     panelConfig    = nullptr;
-    lblKickTitle   = lblKickPath   = lblExtRomTitle = lblExtRomPath = nullptr;
+    lblKickTitle   = lblKickPath   = nullptr;
     chkJIT         = chkRTG        = nullptr;
-    lblMemTitle    = lblChipMem    = lblFastMem     = lblZ3Mem      = nullptr;
+    lblRAMPresetsTitle = nullptr;
+    lblChipMem     = lblFastMem    = lblZ3Mem      = nullptr;
+    for (int i = 0; i < 3; ++i) { btnChip[i] = nullptr; btnZ2[i] = nullptr; }
+    for (int i = 0; i < 2; ++i) { btnZ3[i] = nullptr; }
     lblDrivesTitle = lblHDTitle    = lblCDTitle     = lblCDPath     = nullptr;
     btnKickstart   = btnCD         = nullptr;
     pbarCD         = nullptr;

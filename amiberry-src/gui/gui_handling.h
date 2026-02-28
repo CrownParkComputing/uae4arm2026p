@@ -59,8 +59,8 @@ struct ConfigFileInfo {
 };
 
 // ── Constants used by amiberry_gui.cpp ───────────────────────────────────────
-/// Maximum number of hard-drive devices shown in the GUI (7 slots total)
-#define MAX_HD_DEVICES 7
+/// Maximum number of hard-drive devices shown in the GUI (4 slots total)
+#define MAX_HD_DEVICES 4
 
 // ── Variables declared in amiberry.cpp ───────────────────────────────────────
 extern char last_active_config[];
