@@ -573,6 +573,44 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
+    private String materializeCdImageUriIfNeeded(String cdPathOrUri) {
+        if (cdPathOrUri == null || cdPathOrUri.trim().isEmpty()) return cdPathOrUri;
+        String p = cdPathOrUri.trim();
+        if (!p.startsWith("content://")) return p;
+
+        try {
+            Uri uri = Uri.parse(p);
+            String outName = basenameFromMaybeEncodedDocId(uri.getLastPathSegment());
+            String ext = BootstrapMediaUtils.lowerExt(outName);
+
+            if ("cue".equals(ext)) {
+                logI("Refusing direct SAF CUE mount (requires sibling track files): " + p);
+                return null;
+            }
+
+            File stageDir = new File(getFilesDir(), "uae4arm/cd0_runtime");
+            ensureDir(stageDir);
+            File outFile = new File(stageDir, outName);
+
+            try (InputStream in = getContentResolver().openInputStream(uri);
+                 FileOutputStream out = new FileOutputStream(outFile)) {
+                if (in == null) return null;
+                byte[] buf = new byte[256 * 1024];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    out.write(buf, 0, n);
+                }
+                out.flush();
+            }
+
+            logI("Materialized CD URI to local file: " + outFile.getAbsolutePath());
+            return outFile.getAbsolutePath();
+        } catch (Throwable t) {
+            Log.w(TAG, "CD URI materialize failed: " + t);
+            return null;
+        }
+    }
+
     private static boolean looksLikeRdbHardfile(String path) {
         if (path == null || path.trim().isEmpty()) return false;
         String p = path.trim();
@@ -1742,6 +1780,7 @@ public class AmiberryActivity extends SDLActivity {
     private void applyVideoAspectModeRuntime(int mode) {
         final int normalized = normalizeVideoAspectMode(mode);
         try {
+            nativeSetStretchToFill(normalized == 1);
             nativeSetVideoAspectMode(normalized);
         } catch (Throwable t) {
             Log.w(TAG, "Unable to apply runtime video aspect mode: " + t);
@@ -1752,6 +1791,48 @@ public class AmiberryActivity extends SDLActivity {
     private void updateAspectButtonLabel(Button button, int mode) {
         if (button == null) return;
         button.setText(mode == 0 ? "4:3" : "16:9");
+    }
+
+    private boolean isVirtualJoystickEnabledPref() {
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String source = p.getString(UaeOptionKeys.UAE_INPUT_CONTROLLER_SOURCE, "external");
+            return "virtual".equalsIgnoreCase(source);
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to read virtual joystick pref: " + t);
+            return false;
+        }
+    }
+
+    private void updateVirtualJoystickButtonLabel(Button button, boolean enabled) {
+        if (button == null) return;
+        button.setText("🕹");
+        button.setAlpha(enabled ? 1.0f : 0.55f);
+    }
+
+    private void applyVirtualJoystickRuntime(boolean enabled, boolean persist) {
+        try {
+            if (mVirtualJoystick != null) {
+                mVirtualJoystick.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            }
+            nativeSetVirtualJoystickEnabled(enabled);
+            if (persist) {
+                SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+                p.edit().putString(UaeOptionKeys.UAE_INPUT_CONTROLLER_SOURCE, enabled ? "virtual" : "external").apply();
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to apply virtual joystick runtime state: " + t);
+        }
+    }
+
+    private boolean isCdOnlyQuickstartModel() {
+        try {
+            if (mQsModel == null) return false;
+            String m = mQsModel.trim().toUpperCase(java.util.Locale.ROOT);
+            return "CD32".equals(m) || "CDTV".equals(m) || "ALG".equals(m) || "ARCADIA".equals(m);
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     private static boolean hasMediaPath(String path) {
@@ -1991,6 +2072,12 @@ public class AmiberryActivity extends SDLActivity {
         btnKeyboard.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
         btnKeyboard.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
 
+        final Button btnVirtualJoyToggle = new Button(this);
+        styleOverlayButton(btnVirtualJoyToggle);
+        btnVirtualJoyToggle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
+        btnVirtualJoyToggle.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
+        updateVirtualJoystickButtonLabel(btnVirtualJoyToggle, isVirtualJoystickEnabledPref());
+
         // Center menu panel (initially hidden)
         final LinearLayout menuPanel = new LinearLayout(this);
         menuPanel.setOrientation(LinearLayout.VERTICAL);
@@ -2200,6 +2287,16 @@ public class AmiberryActivity extends SDLActivity {
         lpKeyboard.bottomMargin = marginV;
         overlay.addView(btnKeyboard, lpKeyboard);
 
+        // Position virtual-joystick toggle above keyboard button (icon-only)
+        final FrameLayout.LayoutParams lpVirtualJoyToggle = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        lpVirtualJoyToggle.gravity = android.view.Gravity.BOTTOM | android.view.Gravity.END;
+        lpVirtualJoyToggle.rightMargin = marginH;
+        lpVirtualJoyToggle.bottomMargin = marginV + (int) (52 * d);
+        overlay.addView(btnVirtualJoyToggle, lpVirtualJoyToggle);
+
         // Position status indicators at top-right so they stay visible while running
         final FrameLayout.LayoutParams lpIndicators = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
@@ -2249,6 +2346,9 @@ public class AmiberryActivity extends SDLActivity {
                 lpKeyboard.rightMargin = marginH + insetRight;
                 lpKeyboard.bottomMargin = marginV + insetBottom;
                 btnKeyboard.setLayoutParams(lpKeyboard);
+                lpVirtualJoyToggle.rightMargin = marginH + insetRight;
+                lpVirtualJoyToggle.bottomMargin = marginV + insetBottom + (int) (52 * d);
+                btnVirtualJoyToggle.setLayoutParams(lpVirtualJoyToggle);
                 lpIndicators.topMargin = marginV + insetTop;
                 lpIndicators.rightMargin = marginH + insetRight;
                 rtgRow.setLayoutParams(lpIndicators);
@@ -2340,6 +2440,15 @@ public class AmiberryActivity extends SDLActivity {
             } catch (Throwable t) {
                 Log.w(TAG, "Unable to open Input Mapping: " + t);
             }
+        });
+
+        btnVirtualJoyToggle.setOnClickListener(v -> {
+            boolean enabled = !isVirtualJoystickEnabledPref();
+            applyVirtualJoystickRuntime(enabled, true);
+            updateVirtualJoystickButtonLabel(btnVirtualJoyToggle, enabled);
+            android.widget.Toast.makeText(this,
+                enabled ? "Virtual joystick ON" : "Virtual joystick OFF",
+                android.widget.Toast.LENGTH_SHORT).show();
         });
 
         btnReset.setOnClickListener(v -> {
@@ -2533,57 +2642,72 @@ public class AmiberryActivity extends SDLActivity {
             info = nativeGetRendererDebugInfo();
         } catch (Throwable ignored) {
         }
-        String badge = "DBG";
-        if (info != null) {
-            String lc = info.toLowerCase(java.util.Locale.ROOT);
-            // Try to extract the actual GL renderer name for a friendly badge.
-            String glRenderer = extractLineValue(info, "gl.renderer=");
-            if (lc.contains("build.use_vulkan=1")) {
-                // For Vulkan builds, try to identify driver from renderer string.
-                String driverName = identifyDriverName(glRenderer);
-                badge = (driverName != null) ? driverName : "VK";
-            } else if (glRenderer != null && !glRenderer.equalsIgnoreCase("n/a") && !glRenderer.isEmpty()) {
-                String driverName = identifyDriverName(glRenderer);
-                badge = (driverName != null) ? driverName : "GL";
-            } else if (lc.contains("gfx_api=sdl2")) {
-                badge = "SDL";
+        String label = "DBG";
+        if (info != null && !info.trim().isEmpty()) {
+            String driver = extractRendererDriverLabel(info);
+            if (driver != null && !driver.trim().isEmpty()) {
+                label = driver;
+            } else {
+                String lc = info.toLowerCase(java.util.Locale.ROOT);
+                if (lc.contains("build.use_vulkan=1")) {
+                    label = "Vulkan";
+                } else if (lc.contains("gl.renderer=") && !lc.contains("gl.renderer=n/a")) {
+                    label = "OpenGL";
+                } else if (lc.contains("gfx_api=sdl2")) {
+                    label = "SDL";
+                }
             }
         }
-        mRendererIndicator.setText(badge);
+        mRendererIndicator.setText(label);
         mRendererIndicator.setVisibility(View.VISIBLE);
     }
 
-    /** Extract the value after a "key=" prefix from a multi-line debug string. */
-    private static String extractLineValue(String info, String prefix) {
-        if (info == null) return null;
-        for (String line : info.split("\n")) {
-            if (line.startsWith(prefix)) {
-                String val = line.substring(prefix.length()).trim();
-                return val.isEmpty() ? null : val;
+    private String extractRendererDriverLabel(String info) {
+        if (info == null || info.trim().isEmpty()) return null;
+
+        String vkDevice = extractDebugInfoValue(info, "vk.device_name");
+        if (vkDevice != null && !vkDevice.trim().isEmpty() && !"n/a".equalsIgnoreCase(vkDevice.trim())) {
+            String normalized = normalizeDriverLabel(vkDevice);
+            if (normalized != null && !normalized.trim().isEmpty()) return normalized;
+        }
+
+        String glRenderer = extractDebugInfoValue(info, "gl.renderer");
+        if (glRenderer != null && !glRenderer.trim().isEmpty() && !"n/a".equalsIgnoreCase(glRenderer.trim())) {
+            String normalized = normalizeDriverLabel(glRenderer);
+            if (normalized != null && !normalized.trim().isEmpty()) return normalized;
+        }
+
+        return null;
+    }
+
+    private String extractDebugInfoValue(String info, String key) {
+        if (info == null || key == null || key.trim().isEmpty()) return null;
+        String needle = key + "=";
+        String[] lines = info.split("\\r?\\n");
+        for (String line : lines) {
+            if (line == null) continue;
+            String trimmed = line.trim();
+            if (trimmed.startsWith(needle)) {
+                return trimmed.substring(needle.length()).trim();
             }
         }
         return null;
     }
 
-    /** Return a short friendly driver name from a GL renderer string, or null if unknown. */
-    private static String identifyDriverName(String renderer) {
-        if (renderer == null || renderer.isEmpty()) return null;
-        String lc = renderer.toLowerCase(java.util.Locale.ROOT);
+    private String normalizeDriverLabel(String raw) {
+        if (raw == null) return null;
+        String v = raw.trim();
+        if (v.isEmpty()) return null;
+
+        String lc = v.toLowerCase(java.util.Locale.ROOT);
         if (lc.contains("turnip")) return "Turnip";
-        if (lc.contains("adreno")) return "Adreno";
-        if (lc.contains("qualcomm")) return "Qualcomm";
+        if (lc.contains("qualcomm") || lc.contains("adreno")) return "Qualcomm";
         if (lc.contains("mali")) return "Mali";
-        if (lc.contains("powervr") || lc.contains("sgx")) return "PVR";
-        if (lc.contains("tegra")) return "Tegra";
-        if (lc.contains("apple")) return "Apple";
-        if (lc.contains("mesa")) return "Mesa";
-        if (lc.contains("intel")) return "Intel";
-        if (lc.contains("nvidia")) return "NVIDIA";
-        if (lc.contains("amd") || lc.contains("radeon")) return "AMD";
-        // Fallback: use first word of renderer if it looks reasonable (<=8 chars).
-        String[] parts = renderer.trim().split("[ \\t]+");
-        if (parts.length > 0 && parts[0].length() <= 8) return parts[0];
-        return null;
+        if (lc.contains("powervr")) return "PowerVR";
+
+        int cut = v.indexOf('(');
+        if (cut > 0) v = v.substring(0, cut).trim();
+        return v;
     }
 
     private void showRendererInfoDialog() {
@@ -2647,25 +2771,25 @@ public class AmiberryActivity extends SDLActivity {
 
     private void refreshOverlayDriveStatus() {
         boolean isWHDLoadMode = (mWHDLoadFile != null && !mWHDLoadFile.trim().isEmpty());
-        boolean hasHardDriveMode = hasAnyHardDriveConfigured();
+        boolean isCdOnlyMode = isCdOnlyQuickstartModel();
 
         updateRendererIndicator();
 
         if (mWhdLhaQuickButton != null) {
-            mWhdLhaQuickButton.setVisibility(isWHDLoadMode ? View.VISIBLE : View.GONE);
+            mWhdLhaQuickButton.setVisibility(View.GONE);
         }
         if (mHdQuickButton != null) {
-            mHdQuickButton.setVisibility((!isWHDLoadMode && hasHardDriveMode) ? View.VISIBLE : View.GONE);
+            mHdQuickButton.setVisibility(View.GONE);
         }
         if (mFloppySoundQuickButton != null) {
             mFloppySoundQuickButton.setVisibility(isWHDLoadMode ? View.GONE : View.VISIBLE);
             updateFloppySoundButtonLabel(mFloppySoundQuickButton, getFloppySoundEnabledPref());
         }
 
-        if (mDf0Indicator != null) mDf0Indicator.setVisibility(isWHDLoadMode ? View.GONE : View.VISIBLE);
-        if (mDf1Indicator != null) mDf1Indicator.setVisibility((!isWHDLoadMode && hasMediaPath(mDf1DiskImagePath)) ? View.VISIBLE : View.GONE);
-        if (mDf2Indicator != null) mDf2Indicator.setVisibility((!isWHDLoadMode && hasMediaPath(mDf2DiskImagePath)) ? View.VISIBLE : View.GONE);
-        if (mDf3Indicator != null) mDf3Indicator.setVisibility((!isWHDLoadMode && hasMediaPath(mDf3DiskImagePath)) ? View.VISIBLE : View.GONE);
+        if (mDf0Indicator != null) mDf0Indicator.setVisibility((isWHDLoadMode || isCdOnlyMode) ? View.GONE : View.VISIBLE);
+        if (mDf1Indicator != null) mDf1Indicator.setVisibility((!isWHDLoadMode && !isCdOnlyMode && hasMediaPath(mDf1DiskImagePath)) ? View.VISIBLE : View.GONE);
+        if (mDf2Indicator != null) mDf2Indicator.setVisibility((!isWHDLoadMode && !isCdOnlyMode && hasMediaPath(mDf2DiskImagePath)) ? View.VISIBLE : View.GONE);
+        if (mDf3Indicator != null) mDf3Indicator.setVisibility((!isWHDLoadMode && !isCdOnlyMode && hasMediaPath(mDf3DiskImagePath)) ? View.VISIBLE : View.GONE);
         restartDfBlinkTicker();
     }
 
@@ -3057,11 +3181,8 @@ public class AmiberryActivity extends SDLActivity {
         if (mGuiLayer != null) {
             mVirtualJoystick = new VirtualJoystickOverlay(this);
             // Virtual joystick visibility comes from Input Options controller source.
-            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            String source = p.getString(UaeOptionKeys.UAE_INPUT_CONTROLLER_SOURCE, "external");
-            boolean virtualEnabled = "virtual".equalsIgnoreCase(source);
-            mVirtualJoystick.setVisibility(virtualEnabled ? View.VISIBLE : View.GONE);
-            nativeSetVirtualJoystickEnabled(virtualEnabled);
+            boolean virtualEnabled = isVirtualJoystickEnabledPref();
+            applyVirtualJoystickRuntime(virtualEnabled, false);
             mGuiLayer.addView(mVirtualJoystick, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT
@@ -3150,9 +3271,9 @@ public class AmiberryActivity extends SDLActivity {
 
         // Keep VKBD mapped to full device logical space; video aspect is applied separately in native render.
         try {
-            nativeSetStretchToFill(true);
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            int aspectMode = p.getInt(UaeOptionKeys.UAE_VIDEO_ASPECT_MODE, 1);
+            int aspectMode = normalizeVideoAspectMode(p.getInt(UaeOptionKeys.UAE_VIDEO_ASPECT_MODE, 1));
+            nativeSetStretchToFill(aspectMode == 1);
             nativeSetVideoAspectMode(aspectMode);
         } catch (Throwable t) {
             Log.w(TAG, "Unable to apply Android video defaults: " + t);
@@ -3430,18 +3551,18 @@ public class AmiberryActivity extends SDLActivity {
                 if (intent.hasExtra(EXTRA_HOTSWAP_DF0_PATH)) {
                     String df0 = intent.getStringExtra(EXTRA_HOTSWAP_DF0_PATH);
                     String path = (df0 == null) ? "" : df0.trim();
-                    String prev = (mDf0DiskImagePath == null) ? "" : mDf0DiskImagePath.trim();
                     Log.i(TAG, "Hot-swap DF0 requested: " + (path.isEmpty() ? "(eject)" : path));
-                    if (path.equals(prev)) {
-                        Log.i(TAG, "Hot-swap DF0 ignored (unchanged path)");
-                    } else {
+                    // Always re-insert DF0 even when the path string is unchanged (e.g. stable disk.zip
+                    // whose content changed from disk 1 -> disk 2).
+                    try {
+                        nativeInsertFloppy(0, path);
+                    } catch (Throwable t) {
+                        Log.w(TAG, "DF0 hot-swap failed via nativeInsertFloppy: " + t);
+                    }
                     mDf0DiskImagePath = path.isEmpty() ? null : path;
                     changed = true;
                     persistResolvedFloppyPathsToPrefs();
-                    Log.i(TAG, "DF0 changed - applying runtime floppy update and reset");
-                    applyRuntimeFloppyPathsAndReset();
-                    return;
-                    }
+                    refreshOverlayDriveStatus();
                 }
 
                 if (intent.hasExtra(EXTRA_HOTSWAP_DF1_PATH)) {
@@ -3993,6 +4114,12 @@ public class AmiberryActivity extends SDLActivity {
             if (cd0 != null) cd0 = cd0.trim();
         }
         if (cd0 != null && !cd0.isEmpty()) {
+            if (cd0.startsWith("content://")) {
+                cd0 = materializeCdImageUriIfNeeded(cd0);
+            }
+            if (cd0 == null || cd0.trim().isEmpty()) {
+                logI("Skipping cdimage0 because selected CD path is unavailable for core mount");
+            } else {
             ResolvedMediaPath resolvedCd0 = resolveForCorePathIfNeeded(cd0, /*wantWrite*/ false);
             String cdCorePath = (resolvedCd0 != null && resolvedCd0.corePath != null)
                 ? resolvedCd0.corePath.trim()
@@ -4015,6 +4142,7 @@ public class AmiberryActivity extends SDLActivity {
             args.add("-s");
             args.add("cdimage0=\"" + escapeForUaeQuoted(cdCorePath) + "\",image");
             logI("Emitting cdimage0=" + cdCorePath);
+            }
         }
 
         boolean isCd32Quickstart = false;
@@ -4095,6 +4223,24 @@ public class AmiberryActivity extends SDLActivity {
                 UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI,
                 "DH4", "Work5", -131);
 
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR5_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR5_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR5_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR5_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR5_BOOTPRI,
+                "DH5", "Work6", -132);
+
+            addFilesystem2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_DIR6_PATH,
+                UaeOptionKeys.UAE_DRIVE_DIR6_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR6_VOLNAME,
+                UaeOptionKeys.UAE_DRIVE_DIR6_READONLY,
+                UaeOptionKeys.UAE_DRIVE_DIR6_BOOTPRI,
+                "DH6", "Work7", -133);
+
             // HDF mount (hardfile2)
             needsUaeBootRom |= addHardfile2FromPrefs(args, p,
                 UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
@@ -4143,6 +4289,26 @@ public class AmiberryActivity extends SDLActivity {
                 UaeOptionKeys.UAE_DRIVE_HDF4_READONLY,
                 "DH4",
                 4,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF5_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF5_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF5_READONLY,
+                "DH5",
+                5,
+                mKickstartRomFile,
+                romPath);
+
+            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED,
+                UaeOptionKeys.UAE_DRIVE_HDF6_PATH,
+                UaeOptionKeys.UAE_DRIVE_HDF6_DEVNAME,
+                UaeOptionKeys.UAE_DRIVE_HDF6_READONLY,
+                "DH6",
+                6,
                 mKickstartRomFile,
                 romPath);
         }

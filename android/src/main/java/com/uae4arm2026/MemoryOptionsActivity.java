@@ -3,15 +3,21 @@ package com.uae4arm2026;
 import android.app.Activity;
 import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.view.View;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.CheckBox;
+import android.widget.LinearLayout;
 import android.widget.Spinner;
+import android.widget.TextView;
 
 import java.util.ArrayList;
 import java.util.List;
 
 public class MemoryOptionsActivity extends Activity {
+
+    private static final String PREF_QS_MODEL = "qs_model";
+    public static final String EXTRA_QS_MODEL = "com.uae4arm2026.extra.QS_MODEL";
 
     private Spinner mChipMem;
     private Spinner mSlowMem;
@@ -22,11 +28,38 @@ public class MemoryOptionsActivity extends Activity {
     private Spinner mMbResMem;
     private Spinner mZ3Mapping;
 
+    private CheckBox mJitEnable;
     private CheckBox mRtgEnable;
     private Spinner mRtgVram;
+    private LinearLayout mMemoryControls;
+    private TextView mFixedMemoryNote;
+    private boolean mIsFixedCdModel;
 
     private SharedPreferences prefs() {
         return getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+    }
+
+    private boolean isFixedCdModel() {
+        String model = null;
+        try {
+            if (getIntent() != null) {
+                model = getIntent().getStringExtra(EXTRA_QS_MODEL);
+            }
+        } catch (Throwable ignored) {
+        }
+        if (model == null || model.trim().isEmpty()) {
+            model = prefs().getString(PREF_QS_MODEL, null);
+        }
+        return "CD32".equalsIgnoreCase(model) || "CDTV".equalsIgnoreCase(model);
+    }
+
+    private void applyFixedModelUi() {
+        if (mMemoryControls != null) {
+            mMemoryControls.setVisibility(mIsFixedCdModel ? View.GONE : View.VISIBLE);
+        }
+        if (mFixedMemoryNote != null) {
+            mFixedMemoryNote.setVisibility(mIsFixedCdModel ? View.VISIBLE : View.GONE);
+        }
     }
 
     private static int indexOfInt(int[] values, int needle, int defIdx) {
@@ -45,16 +78,17 @@ public class MemoryOptionsActivity extends Activity {
     }
 
     // chipmem_size values (special units). See src/cfgfile.cpp handling for chipmem_size.
-    private static final int[] CHIP_VALUES = {0, 1, 2, 3, 4, 8, 16};
-    private static final String[] CHIP_LABELS = {"256 KB", "512 KB", "1 MB", "1.5 MB", "2 MB", "4 MB", "8 MB"};
+    // Expose streamlined sizes in the UI: 1 / 2 / 4 / 8 MB.
+    private static final int[] CHIP_VALUES = {2, 4, 8, 16};
+    private static final String[] CHIP_LABELS = {"1 MB", "2 MB", "4 MB", "8 MB"};
 
     // bogomem_size is in 256K units.
     private static final int[] BOGO_VALUES = {0, 2, 4, 6, 7};
     private static final String[] BOGO_LABELS = {"None", "512 KB", "1 MB", "1.5 MB", "1.8 MB"};
 
-    // fastmem stored as bytes. We apply it as fastmem_size_k (<1MB) or fastmem_size (>=1MB).
-    private static final int[] FAST_BYTES = {0, 1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
-    private static final String[] FAST_LABELS = {"None", "1 MB", "2 MB", "4 MB", "8 MB"};
+    // fastmem stored as bytes. Expose streamlined Z2 sizes in the UI: 1 / 2 / 4 / 8 MB.
+    private static final int[] FAST_BYTES = {1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
+    private static final String[] FAST_LABELS = {"1 MB", "2 MB", "4 MB", "8 MB"};
 
     private static final int[] Z3FAST_MB = {0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024};
     private static final String[] Z3FAST_LABELS = {"None", "1 MB", "2 MB", "4 MB", "8 MB", "16 MB", "32 MB", "64 MB", "128 MB", "256 MB", "512 MB", "1 GB"};
@@ -126,7 +160,7 @@ public class MemoryOptionsActivity extends Activity {
     private void load() {
         SharedPreferences p = prefs();
 
-        int chip = p.getInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, CHIP_VALUES[2]);
+        int chip = p.getInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, CHIP_VALUES[0]);
         int bogo = p.getInt(UaeOptionKeys.UAE_MEM_BOGOMEM_SIZE, 0);
         int fastBytes = p.getInt(UaeOptionKeys.UAE_MEM_FASTMEM_BYTES, 0);
         int z3 = p.getInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 0);
@@ -135,16 +169,10 @@ public class MemoryOptionsActivity extends Activity {
         int mbres = p.getInt(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB, 0);
         String z3map = p.getString(UaeOptionKeys.UAE_MEM_Z3MAPPING, "auto");
 
-        // If JIT is enabled, ensure at least 64 MB of Z3 fast RAM for 32-bit addressing.
-        boolean jitEnabled = p.getBoolean(UaeOptionKeys.UAE_JIT_ENABLED, false);
-        if (jitEnabled && z3 < 64) {
-            z3 = 64;
-        }
-
         int rtgSize = p.getInt(UaeOptionKeys.UAE_GFXCARD_SIZE_MB, 0);
         String rtgType = p.getString(UaeOptionKeys.UAE_GFXCARD_TYPE, null);
 
-        mChipMem.setSelection(indexOfInt(CHIP_VALUES, chip, 2));
+        mChipMem.setSelection(indexOfInt(CHIP_VALUES, chip, 0));
         mSlowMem.setSelection(indexOfInt(BOGO_VALUES, bogo, 0));
         mFastMem.setSelection(indexOfInt(FAST_BYTES, fastBytes, 0));
         mZ3Fast.setSelection(indexOfInt(Z3FAST_MB, z3, 0));
@@ -152,6 +180,10 @@ public class MemoryOptionsActivity extends Activity {
         mA3000Mem.setSelection(indexOfInt(MB_MB, a3000, 0));
         mMbResMem.setSelection(indexOfInt(MB_MB, mbres, 0));
         mZ3Mapping.setSelection(indexOfString(z3MappingValues(), z3map, 0));
+
+        if (mJitEnable != null) {
+            mJitEnable.setChecked(p.getBoolean(UaeOptionKeys.UAE_JIT_ENABLED, false));
+        }
 
         if (mRtgEnable != null) {
             mRtgEnable.setChecked(rtgSize > 0 && rtgType != null && !rtgType.trim().isEmpty());
@@ -165,6 +197,8 @@ public class MemoryOptionsActivity extends Activity {
     }
 
     private void save() {
+        if (mIsFixedCdModel) return;
+
         SharedPreferences.Editor e = prefs().edit();
 
         e.putInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, CHIP_VALUES[mChipMem.getSelectedItemPosition()]);
@@ -177,6 +211,7 @@ public class MemoryOptionsActivity extends Activity {
         e.putInt(UaeOptionKeys.UAE_MEM_A3000MEM_SIZE_MB, MB_MB[mA3000Mem.getSelectedItemPosition()]);
         e.putInt(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB, MB_MB[mMbResMem.getSelectedItemPosition()]);
         e.putString(UaeOptionKeys.UAE_MEM_Z3MAPPING, z3MappingValues().get(mZ3Mapping.getSelectedItemPosition()));
+        e.putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, mJitEnable != null && mJitEnable.isChecked());
 
         // RTG (Picasso96 / UAEGFX)
         boolean rtgEnabled = mRtgEnable != null && mRtgEnable.isChecked();
@@ -205,6 +240,8 @@ public class MemoryOptionsActivity extends Activity {
     }
 
     private void resetAll() {
+        if (mIsFixedCdModel) return;
+
         prefs().edit()
             .remove(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE)
             .remove(UaeOptionKeys.UAE_MEM_BOGOMEM_SIZE)
@@ -214,6 +251,7 @@ public class MemoryOptionsActivity extends Activity {
             .remove(UaeOptionKeys.UAE_MEM_A3000MEM_SIZE_MB)
             .remove(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB)
             .remove(UaeOptionKeys.UAE_MEM_Z3MAPPING)
+            .remove(UaeOptionKeys.UAE_JIT_ENABLED)
             .remove(UaeOptionKeys.UAE_GFXCARD_SIZE_MB)
             .remove(UaeOptionKeys.UAE_GFXCARD_TYPE)
             .apply();
@@ -225,6 +263,11 @@ public class MemoryOptionsActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_memory_options);
 
+        mMemoryControls = findViewById(R.id.layoutMemoryControls);
+        mFixedMemoryNote = findViewById(R.id.txtFixedMemoryNote);
+        mIsFixedCdModel = isFixedCdModel();
+        applyFixedModelUi();
+
         mChipMem = findViewById(R.id.spinnerChipMem);
         mSlowMem = findViewById(R.id.spinnerSlowMem);
         mFastMem = findViewById(R.id.spinnerFastMem);
@@ -234,6 +277,7 @@ public class MemoryOptionsActivity extends Activity {
         mMbResMem = findViewById(R.id.spinnerMbResMem);
         mZ3Mapping = findViewById(R.id.spinnerZ3Mapping);
 
+        mJitEnable = findViewById(R.id.chkJitEnable);
         mRtgEnable = findViewById(R.id.chkRtgEnable);
         mRtgVram = findViewById(R.id.spinnerRtgVram);
 
@@ -251,6 +295,10 @@ public class MemoryOptionsActivity extends Activity {
                 }
                 save();
             });
+        }
+
+        if (mJitEnable != null) {
+            mJitEnable.setOnCheckedChangeListener((b, checked) -> save());
         }
 
         Button btnSave = findViewById(R.id.btnMemorySave);

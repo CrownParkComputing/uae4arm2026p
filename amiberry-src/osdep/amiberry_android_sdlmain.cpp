@@ -7,10 +7,16 @@
 #include <jni.h>
 
 #include <atomic>
+#include <cstdio>
 #include <string>
+#include <vector>
 
 #include <SDL.h>
 #include <SDL_hints.h>
+#ifdef USE_VULKAN
+#include <SDL_vulkan.h>
+#include <vulkan/vulkan.h>
+#endif
 
 #ifdef USE_OPENGL
 #include <SDL_opengl.h>
@@ -351,6 +357,61 @@ Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererDebugInfo(JNIEnv* env, jc
 	out += "\n";
 	out += "gl.version=";
 	out += gl_version;
+
+#ifdef USE_VULKAN
+	std::string vk_device_name = "n/a";
+	if (SDL_Vulkan_LoadLibrary(nullptr) == 0) {
+		using VkGetInstanceProcAddrFn = PFN_vkVoidFunction (*)(VkInstance, const char*);
+		auto vkGetInstanceProcAddr = reinterpret_cast<VkGetInstanceProcAddrFn>(SDL_Vulkan_GetVkGetInstanceProcAddr());
+		if (vkGetInstanceProcAddr) {
+			auto vkCreateInstance = reinterpret_cast<PFN_vkCreateInstance>(vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance"));
+			auto vkDestroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkDestroyInstance"));
+			auto vkEnumeratePhysicalDevices = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkEnumeratePhysicalDevices"));
+			auto vkGetPhysicalDeviceProperties = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkGetPhysicalDeviceProperties"));
+
+			if (vkCreateInstance && vkDestroyInstance && vkEnumeratePhysicalDevices && vkGetPhysicalDeviceProperties) {
+				VkApplicationInfo app_info{};
+				app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+				app_info.pApplicationName = "uae4arm";
+				app_info.applicationVersion = VK_MAKE_VERSION(1, 0, 0);
+				app_info.pEngineName = "amiberry";
+				app_info.engineVersion = VK_MAKE_VERSION(1, 0, 0);
+				app_info.apiVersion = VK_API_VERSION_1_0;
+
+				VkInstanceCreateInfo instance_info{};
+				instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+				instance_info.pApplicationInfo = &app_info;
+
+				VkInstance instance = VK_NULL_HANDLE;
+				if (vkCreateInstance(&instance_info, nullptr, &instance) == VK_SUCCESS && instance != VK_NULL_HANDLE) {
+					auto vkEnumeratePhysicalDevicesInst = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(vkGetInstanceProcAddr(instance, "vkEnumeratePhysicalDevices"));
+					auto vkGetPhysicalDevicePropertiesInst = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties>(vkGetInstanceProcAddr(instance, "vkGetPhysicalDeviceProperties"));
+					if (vkEnumeratePhysicalDevicesInst && vkGetPhysicalDevicePropertiesInst) {
+						uint32_t device_count = 0;
+						if (vkEnumeratePhysicalDevicesInst(instance, &device_count, nullptr) == VK_SUCCESS && device_count > 0) {
+							std::vector<VkPhysicalDevice> devices(device_count);
+							if (vkEnumeratePhysicalDevicesInst(instance, &device_count, devices.data()) == VK_SUCCESS && !devices.empty() && devices[0] != VK_NULL_HANDLE) {
+								VkPhysicalDeviceProperties props{};
+								vkGetPhysicalDevicePropertiesInst(devices[0], &props);
+								if (props.deviceName[0] != '\0') {
+									vk_device_name = props.deviceName;
+								}
+							}
+						}
+					}
+					vkDestroyInstance(instance, nullptr);
+				}
+			}
+		}
+		SDL_Vulkan_UnloadLibrary();
+	}
+	out += "\n";
+	out += "vk.device_name=";
+	out += vk_device_name;
+#else
+	out += "\n";
+	out += "vk.device_name=n/a";
+#endif
 
 	return env->NewStringUTF(out.c_str());
 }

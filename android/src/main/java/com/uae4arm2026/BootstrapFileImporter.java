@@ -42,7 +42,7 @@ final class BootstrapFileImporter {
             }
             out.flush();
             return dest.exists() && dest.length() > 0;
-        } catch (IOException e) {
+        } catch (Throwable e) {
             Log.w(TAG, "Import failed for " + uri + " -> " + dest.getAbsolutePath(), e);
             return false;
         }

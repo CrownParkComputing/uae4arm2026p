@@ -2,6 +2,7 @@
 
   <!-- External Kickstart lookup: /storage/emulated/0/uae4arm2026/kickstarts/kick.rom -->
   <!-- For Android 6-12 this can require READ_EXTERNAL_STORAGE; for Android 11+ you may also need "All files access". -->
+  <uses-permission android:name="android.permission.INTERNET" />
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
   <application
@@ -130,6 +131,22 @@
 
         <activity
           android:name="com.uae4arm2026.PathsOptionsActivity"
+          android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+          android:exported="false"
+          android:screenOrientation="landscape"
+          android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+          android:hardwareAccelerated="true" />
+
+        <activity
+          android:name="com.uae4arm2026.AdfLibraryActivity"
+          android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+          android:exported="false"
+          android:screenOrientation="landscape"
+          android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+          android:hardwareAccelerated="true" />
+
+        <activity
+          android:name="com.uae4arm2026.LogsActivity"
           android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
           android:exported="false"
           android:screenOrientation="landscape"

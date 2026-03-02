@@ -459,45 +459,26 @@ public class WalkthroughActivity extends Activity {
 
 		LinearLayout layout = new LinearLayout(this);
 		layout.setOrientation(LinearLayout.VERTICAL);
-		int pad = (int) (16 * getResources().getDisplayMetrics().density);
+		int pad = (int) (8 * getResources().getDisplayMetrics().density);
 		layout.setPadding(pad, pad, pad, pad);
 
 		SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 		mParentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
 
 		mPathsStatusText = new TextView(this);
-		mPathsStatusText.setTextSize(14);
+		mPathsStatusText.setTextSize(12);
 		updatePathsStatusText();
 		layout.addView(mPathsStatusText);
 
 		Button btnPickFolder = new Button(this);
-		btnPickFolder.setText("Select Parent Folder");
+		btnPickFolder.setText("Change Parent Folder");
+		btnPickFolder.setTextSize(12);
 		btnPickFolder.setOnClickListener(v -> pickSafParentFolder());
 		layout.addView(btnPickFolder);
 
-		TextView perTypeTitle = new TextView(this);
-		perTypeTitle.setTextSize(14);
-		perTypeTitle.setPadding(0, pad, 0, 0);
-		perTypeTitle.setText("Select folder for each content type:");
-		layout.addView(perTypeTitle);
-
 		for (PathTarget target : PATH_TARGETS) {
-			addPathTargetRow(layout, target, pad);
+			addFullPathRow(layout, target, pad);
 		}
-
-		TextView helpText = new TextView(this);
-		helpText.setTextSize(12);
-		helpText.setPadding(0, pad, 0, 0);
-		helpText.setText("Select a parent folder where your Amiga files are stored.\n\n" +
-			"The emulator will look for these subfolders:\n" +
-			"• roms/ - Kickstart ROMs\n" +
-			"• disks/ - Floppy/HDD images\n" +
-			"• conf/ - Configuration files\n" +
-			"• savestates/ - Save states\n" +
-			"• screenshots/ - Screenshots\n" +
-			"• whdboot/ - WHDLoad boot files\n\n" +
-			"If the folder doesn't exist, it will be created.");
-		layout.addView(helpText);
 
 		mPageContainer.addView(layout);
 		mBtnSkip.setVisibility(View.VISIBLE);
@@ -512,42 +493,32 @@ public class WalkthroughActivity extends Activity {
 		}
 	}
 
-	private void addPathTargetRow(LinearLayout parent, PathTarget target, int pad) {
+	private void addFullPathRow(LinearLayout parent, PathTarget target, int pad) {
 		SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 		String current = prefs.getString(target.prefKey, null);
+		String shown = (current == null || current.trim().isEmpty()) ? "(not set)" : current.trim();
 
 		TextView label = new TextView(this);
-		label.setTextSize(13);
+		label.setTextSize(12);
 		label.setPadding(0, pad, 0, 0);
-		String shown = (current == null || current.trim().isEmpty()) ? "(not set)" : formatSafPath(current);
-		label.setText("• " + target.label + ":\n" + shown);
+		label.setText("• " + target.label + "\n" + shown);
 		parent.addView(label);
 
-		LinearLayout row = new LinearLayout(this);
-		row.setOrientation(LinearLayout.HORIZONTAL);
-
-		Button btnUseDefault = new Button(this);
-		btnUseDefault.setText("Use Parent Default");
-		btnUseDefault.setOnClickListener(v -> applyParentDefaultPath(target));
-		row.addView(btnUseDefault);
-
 		Button btnPickCustom = new Button(this);
-		btnPickCustom.setText("Pick Folder");
+		btnPickCustom.setText("Change " + target.label + " Path");
+		btnPickCustom.setTextSize(11);
 		btnPickCustom.setOnClickListener(v -> pickPathFolder(target));
-		row.addView(btnPickCustom);
-
-		parent.addView(row);
+		parent.addView(btnPickCustom);
 	}
 
 	private void updatePathsStatusText() {
 		if (mPathsStatusText == null) return;
 
 		if (mParentTreeUri != null && !mParentTreeUri.trim().isEmpty()) {
-			String label = getSafFolderLabel(mParentTreeUri);
-			mPathsStatusText.setText("✅ Parent folder selected:\n" + label);
+			mPathsStatusText.setText("✅ Parent folder:\n" + mParentTreeUri);
 			mPathsStatusText.setTextColor(0xFF4CAF50);
 		} else {
-			mPathsStatusText.setText("❌ No parent folder selected.\n\nPlease select a folder to store your Amiga files.");
+			mPathsStatusText.setText("❌ Parent folder: (not set)");
 			mPathsStatusText.setTextColor(0xFFF44336);
 		}
 	}
@@ -806,13 +777,13 @@ public class WalkthroughActivity extends Activity {
 		} else if (mSelectedModel.equals("CDTV")) {
 			chipset = "CDTV";
 		}
-		e.putString(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE, chipset);
 
+		e.putString(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE, chipset);
 		e.apply();
 	}
 
 	private void updateNavigationButtons() {
-		mBtnBack.setVisibility(mCurrentPage > 0 ? View.VISIBLE : View.GONE);
+		mBtnBack.setEnabled(mCurrentPage > 0);
 
 		if (mCurrentPage == PAGE_COMPLETE) {
 			mBtnNext.setText(R.string.walkthrough_start);
@@ -828,7 +799,6 @@ public class WalkthroughActivity extends Activity {
 			.setTitle(R.string.walkthrough_skip_title)
 			.setMessage(R.string.walkthrough_skip_message)
 			.setPositiveButton(R.string.walkthrough_skip_yes, (d, w) -> {
-				markWalkthroughCompleted();
 				startBootstrap();
 				finish();
 			})
@@ -844,9 +814,7 @@ public class WalkthroughActivity extends Activity {
 
 	private File getDisksDir() {
 		File base = AppPaths.getBaseDir(this);
-		File disks = new File(base, "disks");
-		if (!disks.exists()) disks.mkdirs();
-		return disks;
+		return new File(base, "disks");
 	}
 
 	private boolean hasDiskImages(File dir) {

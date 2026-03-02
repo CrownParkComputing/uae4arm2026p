@@ -1,7 +1,1 @@
 theme: jekyll-theme-minimal
-title: UAE4ARM 2026
-description: Amiga emulator for Android — optimized for arm64 with native SDL2 core
-url: "https://uae4arm.crownparkcomputing.com"
-repository: CrownParkComputing/uae4arm_2026
-show_downloads: true
-google_analytics:

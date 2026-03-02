@@ -985,13 +985,10 @@ void vkbd_update_position_from_texture()
 	vkbdPositionSpaceH = rendererHeight;
 #endif
 
-	// For touch devices, scale keyboard to be DOUBLE the screen width
-	// This ensures all keys are large enough for touch input
-	// The keyboard will be positioned at the bottom of the screen
-	
-	// Scale to 2x screen width for larger keys
+	// For touch devices, scale keyboard to be DOUBLE the screen width.
+	// This keeps keys larger and easier to hit.
 	const float scaleToFitWidth = static_cast<float>(renderedWidth) / static_cast<float>(width);
-	vkbdScale = scaleToFitWidth * 2.0f;  // Double the size
+	vkbdScale = scaleToFitWidth * 2.0f;
 	vkbdScaledWidth = static_cast<int>(width * vkbdScale);
 	vkbdScaledHeight = static_cast<int>(height * vkbdScale);
 	
