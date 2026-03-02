@@ -37,15 +37,18 @@ final class UaeDrivePrefs {
             String hdf3, String dir3,
             String hdf4, String dir4,
             String hdf5, String dir5,
-            String hdf6, String dir6
+            String hdf6, String dir6,
+            boolean agsAutoMountEnabled,
+            String agsBasePath
         ) {
-            dh0Configured = !safeTrim(hdf0).isEmpty() || !safeTrim(dir0).isEmpty();
-            dh1Configured = !safeTrim(hdf1).isEmpty() || !safeTrim(dir1).isEmpty();
-            dh2Configured = !safeTrim(hdf2).isEmpty() || !safeTrim(dir2).isEmpty();
-            dh3Configured = !safeTrim(hdf3).isEmpty() || !safeTrim(dir3).isEmpty();
-            dh4Configured = !safeTrim(hdf4).isEmpty() || !safeTrim(dir4).isEmpty();
-            dh5Configured = !safeTrim(hdf5).isEmpty() || !safeTrim(dir5).isEmpty();
-            dh6Configured = !safeTrim(hdf6).isEmpty() || !safeTrim(dir6).isEmpty();
+            boolean agsConfigured = agsAutoMountEnabled && !safeTrim(agsBasePath).isEmpty();
+            dh0Configured = agsConfigured || !safeTrim(hdf0).isEmpty() || !safeTrim(dir0).isEmpty();
+            dh1Configured = agsConfigured || !safeTrim(hdf1).isEmpty() || !safeTrim(dir1).isEmpty();
+            dh2Configured = agsConfigured || !safeTrim(hdf2).isEmpty() || !safeTrim(dir2).isEmpty();
+            dh3Configured = agsConfigured || !safeTrim(hdf3).isEmpty() || !safeTrim(dir3).isEmpty();
+            dh4Configured = agsConfigured || !safeTrim(hdf4).isEmpty() || !safeTrim(dir4).isEmpty();
+            dh5Configured = agsConfigured || !safeTrim(hdf5).isEmpty() || !safeTrim(dir5).isEmpty();
+            dh6Configured = agsConfigured || !safeTrim(hdf6).isEmpty() || !safeTrim(dir6).isEmpty();
         }
     }
 
@@ -60,7 +63,9 @@ final class UaeDrivePrefs {
     }
 
     static HardDriveConfig readHardDriveConfig(SharedPreferences prefs) {
-        if (prefs == null) return new HardDriveConfig("", "", "", "", "", "", "", "", "", "", "", "", "", "");
+        if (prefs == null) return new HardDriveConfig("", "", "", "", "", "", "", "", "", "", "", "", "", "", false, "");
+        boolean agsEnabled = prefs.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+        String agsBasePath = prefs.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, "");
         return new HardDriveConfig(
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF0_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR0_PATH, ""),
@@ -75,7 +80,9 @@ final class UaeDrivePrefs {
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF5_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR5_PATH, ""),
             prefs.getString(UaeOptionKeys.UAE_DRIVE_HDF6_PATH, ""),
-            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, "")
+            prefs.getString(UaeOptionKeys.UAE_DRIVE_DIR6_PATH, ""),
+            agsEnabled,
+            agsBasePath
         );
     }
 

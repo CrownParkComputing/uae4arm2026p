@@ -5896,7 +5896,10 @@ public class BootstrapActivity extends Activity {
         }
         refreshStatus();
 
-        final String[] options = new String[]{"Choose HDF file", "Choose folder", "Set label", "Clear slot"};
+        final boolean isDh0 = slot == 0;
+        final String[] options = isDh0
+            ? new String[]{"Choose HDF file", "Choose folder", "AGS auto-mount setup", "Set label", "Clear slot"}
+            : new String[]{"Choose HDF file", "Choose folder", "Set label", "Clear slot"};
         new AlertDialog.Builder(this)
             .setTitle("DH" + slot)
             .setItems(options, (d, which) -> {
@@ -5908,7 +5911,10 @@ public class BootstrapActivity extends Activity {
                     else if (slot == 4) pickDh4Hdf();
                     else if (slot == 5) pickDh5Hdf();
                     else pickDh6Hdf();
-                } else if (which == 1) {
+                    return;
+                }
+
+                if (which == 1) {
                     if (slot == 0) pickDh0Folder();
                     else if (slot == 1) pickDh1Folder();
                     else if (slot == 2) pickDh2Folder();
@@ -5916,21 +5922,31 @@ public class BootstrapActivity extends Activity {
                     else if (slot == 4) pickDh4Folder();
                     else if (slot == 5) pickDh5Folder();
                     else pickDh6Folder();
-                } else if (which == 2) {
+                    return;
+                }
+
+                if (isDh0 && which == 2) {
+                    startActivity(new Intent(this, DrivesOptionsActivity.class));
+                    return;
+                }
+
+                int labelIndex = isDh0 ? 3 : 2;
+                if (which == labelIndex) {
                     promptDhVolumeNameThen(slot, () -> {
                         applyDhVolumeNameToUaePrefs(slot);
                         refreshStatus();
                     });
-                } else {
-                    if (slot == 0) {
-                        clearDh0FromUaePrefs();
-                    } else if (slot == 1) {
-                        removeDh1CompletelyFromUaePrefs();
-                    } else {
-                        removeDhCompletelyFromUaePrefs(slot);
-                    }
-                    refreshStatus();
+                    return;
                 }
+
+                if (slot == 0) {
+                    clearDh0FromUaePrefs();
+                } else if (slot == 1) {
+                    removeDh1CompletelyFromUaePrefs();
+                } else {
+                    removeDhCompletelyFromUaePrefs(slot);
+                }
+                refreshStatus();
             })
             .setNegativeButton(android.R.string.cancel, null)
             .show();

@@ -227,6 +227,10 @@ public final class UaeOptionKeys {
     public static final String UAE_DRIVE_HDF6_DEVNAME = "uae_drive_hdf6_devname"; // string (e.g. DH6)
     public static final String UAE_DRIVE_HDF6_READONLY = "uae_drive_hdf6_readonly"; // boolean
 
+    // AGS UAE auto-mount profile (maps a known AGS_UAE folder layout to hardfile2/filesystem2 args).
+    public static final String UAE_DRIVE_AGS_AUTOMOUNT_ENABLED = "uae_drive_ags_automount_enabled"; // boolean
+    public static final String UAE_DRIVE_AGS_BASE_PATH = "uae_drive_ags_base_path"; // string folder path or SAF tree URI
+
     // Optional filesystem module for non-RDB DOS\x hardfiles (e.g. FastFileSystem).
     // Stored as an absolute path in app-internal storage so the core can load it.
     public static final String UAE_DRIVE_DOS_FS_MODULE_PATH = "uae_drive_dos_fs_module_path"; // string absolute path

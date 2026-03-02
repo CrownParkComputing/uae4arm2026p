@@ -238,7 +238,7 @@ static bool android_uri_exists(const char* uri)
 	JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
 	if (!env || !uri) return false;
 
-	jclass bridgeCls = load_class_with_activity_classloader(env, "com/blitterstudio/amiberry/SafFileBridge");
+	jclass bridgeCls = load_class_with_activity_classloader(env, "com/uae4arm2026/SafFileBridge");
 	if (!bridgeCls) return false;
 
 	if (is_tree_uri_path(uri)) {
@@ -288,7 +288,7 @@ static bool android_uri_is_directory(const char* uri)
 	JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
 	if (!env || !uri) return false;
 
-	jclass bridgeCls = load_class_with_activity_classloader(env, "com/blitterstudio/amiberry/SafFileBridge");
+	jclass bridgeCls = load_class_with_activity_classloader(env, "com/uae4arm2026/SafFileBridge");
 	if (!bridgeCls) return false;
 
 	if (is_tree_uri_path(uri)) {
@@ -339,7 +339,7 @@ static bool android_list_children_tree_path(const char* treePath, std::vector<st
 	JNIEnv* env = static_cast<JNIEnv*>(SDL_AndroidGetJNIEnv());
 	if (!env || !treePath) return false;
 
-	jclass bridgeCls = load_class_with_activity_classloader(env, "com/blitterstudio/amiberry/SafFileBridge");
+	jclass bridgeCls = load_class_with_activity_classloader(env, "com/uae4arm2026/SafFileBridge");
 	if (!bridgeCls) return false;
 
 	std::string treeUri;

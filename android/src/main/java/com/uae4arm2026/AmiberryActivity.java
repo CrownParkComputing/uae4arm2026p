@@ -27,6 +27,8 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.ScrollView;
 
+import androidx.documentfile.provider.DocumentFile;
+
 import org.libsdl.app.SDLActivity;
 
 import org.json.JSONObject;
@@ -1348,6 +1350,172 @@ public class AmiberryActivity extends SDLActivity {
             "filesystem2=" + (ro ? "ro" : "rw") + "," + dev.trim() + ":" + vol.trim() + ":\"" +
                 escapeForUaeQuoted(path.trim()) + "\"," + bootPri
         );
+    }
+
+    private static final class AgsHardfileSpec {
+        final String fileName;
+        final String devName;
+        final int controllerUnit;
+
+        AgsHardfileSpec(String fileName, String devName, int controllerUnit) {
+            this.fileName = fileName;
+            this.devName = devName;
+            this.controllerUnit = controllerUnit;
+        }
+    }
+
+    private static final class AgsAutoMountResult {
+        final boolean mountedAny;
+        final boolean mountedHardfile;
+
+        AgsAutoMountResult(boolean mountedAny, boolean mountedHardfile) {
+            this.mountedAny = mountedAny;
+            this.mountedHardfile = mountedHardfile;
+        }
+    }
+
+    private static final AgsHardfileSpec[] AGS_HARDFILE_SPECS = new AgsHardfileSpec[] {
+        new AgsHardfileSpec("Workbench.hdf", "DH0", 0),
+        new AgsHardfileSpec("Work.hdf", "DH1", 8),
+        new AgsHardfileSpec("Music.hdf", "DH2", 11),
+        new AgsHardfileSpec("Media.hdf", "DH3", 9),
+        new AgsHardfileSpec("AGS_Drive.hdf", "DH4", 1),
+        new AgsHardfileSpec("Games.hdf", "DH5", 2),
+        new AgsHardfileSpec("Premium.hdf", "DH6", 12),
+        new AgsHardfileSpec("Emulators.hdf", "DH7", 10),
+        new AgsHardfileSpec("Emulators2.hdf", "DH15", 15),
+        new AgsHardfileSpec("WHD_Demos.hdf", "DH13", 6),
+        new AgsHardfileSpec("WHD_Games.hdf", "DH14", 14),
+    };
+
+    private static String deriveAgsBasePathFromPrefs(SharedPreferences p) {
+        if (p == null) return null;
+
+        String explicit = p.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, null);
+        if (explicit != null && !explicit.trim().isEmpty()) {
+            return explicit.trim();
+        }
+
+        String harddrivePath = p.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null);
+        if (harddrivePath == null || harddrivePath.trim().isEmpty()) return null;
+
+        String candidate = harddrivePath.trim();
+        if (candidate.startsWith("content://")) return candidate;
+
+        try {
+            File direct = new File(candidate);
+            if (direct.exists() && direct.isDirectory()) {
+                File rootMarker = new File(direct, "Workbench.hdf");
+                if (rootMarker.exists() && rootMarker.isFile()) {
+                    return direct.getAbsolutePath();
+                }
+                File child = new File(direct, "AGS_UAE");
+                if (child.exists() && child.isDirectory()) {
+                    File childMarker = new File(child, "Workbench.hdf");
+                    if (childMarker.exists() && childMarker.isFile()) {
+                        return child.getAbsolutePath();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+
+        return candidate;
+    }
+
+    private static String findChildUnderAgsBase(String basePathOrTreeUri, String childName, boolean directory) {
+        if (basePathOrTreeUri == null || basePathOrTreeUri.trim().isEmpty()) return null;
+        String base = basePathOrTreeUri.trim();
+
+        if (base.startsWith("content://")) {
+            try {
+                Context ctx = SDLActivity.getContext();
+                if (ctx == null) return null;
+                DocumentFile root = DocumentFile.fromTreeUri(ctx, Uri.parse(base));
+                if (root == null || !root.isDirectory()) return null;
+                DocumentFile[] kids = root.listFiles();
+                if (kids == null) return null;
+                for (DocumentFile kid : kids) {
+                    if (kid == null) continue;
+                    String name = kid.getName();
+                    if (name == null || !name.equalsIgnoreCase(childName)) continue;
+                    if (directory && kid.isDirectory()) return kid.getUri().toString();
+                    if (!directory && kid.isFile()) return kid.getUri().toString();
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "AGS tree child resolve failed: " + t);
+            }
+            return null;
+        }
+
+        try {
+            File f = new File(base, childName);
+            if (!f.exists()) return null;
+            if (directory && !f.isDirectory()) return null;
+            if (!directory && !f.isFile()) return null;
+            return f.getAbsolutePath();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static AgsAutoMountResult addAgsAutoMountsFromPrefs(List<String> args, SharedPreferences p) {
+        if (args == null || p == null) return new AgsAutoMountResult(false, false);
+        if (!p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false)) {
+            return new AgsAutoMountResult(false, false);
+        }
+
+        String agsBase = deriveAgsBasePathFromPrefs(p);
+        if (agsBase == null || agsBase.trim().isEmpty()) {
+            logI("AGS auto-mount enabled but no AGS base folder configured");
+            return new AgsAutoMountResult(false, false);
+        }
+
+        logI("AGS auto-mount probe base=" + agsBase);
+
+        boolean mountedAny = false;
+        boolean mountedHardfile = false;
+
+        for (AgsHardfileSpec spec : AGS_HARDFILE_SPECS) {
+            String sourcePath = findChildUnderAgsBase(agsBase, spec.fileName, false);
+            if (sourcePath == null || sourcePath.trim().isEmpty()) {
+                logI("AGS missing " + spec.fileName + " under " + agsBase + " (skipping)");
+                continue;
+            }
+
+            ResolvedMediaPath resolved = resolveForCorePathIfNeeded(sourcePath, /*wantWrite*/ true);
+            String corePath = (resolved != null && resolved.corePath != null) ? resolved.corePath.trim() : sourcePath;
+            boolean ro = (resolved != null && resolved.forcedReadOnly);
+
+            String hardfile2 =
+                "hardfile2=" + (ro ? "ro" : "rw") + "," + spec.devName + ":\"" + escapeForUaeQuoted(corePath) +
+                    "\",0,0,0,512,0,,uae" + spec.controllerUnit;
+
+            logI("AGS mount: -s " + hardfile2);
+            args.add("-s");
+            args.add(hardfile2);
+            mountedAny = true;
+            mountedHardfile = true;
+        }
+
+        String sharedPath = findChildUnderAgsBase(agsBase, "SHARED", true);
+        if (sharedPath != null && !sharedPath.trim().isEmpty()) {
+            if (sharedPath.startsWith("content://")) {
+                logI("AGS SHARED is SAF tree URI; skipping filesystem2 mount because directory mounts require filesystem path");
+            } else {
+                String fs2 = "filesystem2=rw,DH9:SHARED:\"" + escapeForUaeQuoted(sharedPath) + "\",0";
+                logI("AGS mount: -s " + fs2);
+                args.add("-s");
+                args.add(fs2);
+                mountedAny = true;
+            }
+        }
+
+        if (!mountedAny) {
+            logI("AGS auto-mount enabled but no AGS media entries were found");
+        }
+
+        return new AgsAutoMountResult(mountedAny, mountedHardfile);
     }
 
     private static void addSettingArg(List<String> args, String key, String value) {
@@ -4177,140 +4345,145 @@ public class AmiberryActivity extends SDLActivity {
         // from interfering with CD32/CDTV game boot/runtime behavior.
         boolean needsUaeBootRom = false;
         if (!isCdOnlyQuickstart) {
-            // Directory mounts (filesystem2)
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR0_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR0_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI,
-                "DH0", "Work", 0);
+            AgsAutoMountResult agsResult = addAgsAutoMountsFromPrefs(args, p);
+            needsUaeBootRom |= agsResult.mountedHardfile;
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR1_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR1_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI,
-                "DH1", "Work2", -128);
+            if (!agsResult.mountedAny) {
+                // Directory mounts (filesystem2)
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR0_BOOTPRI,
+                    "DH0", "Work", 0);
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR2_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR2_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI,
-                "DH2", "Work3", -129);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR1_BOOTPRI,
+                    "DH1", "Work2", -128);
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR3_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR3_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI,
-                "DH3", "Work4", -130);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR2_BOOTPRI,
+                    "DH2", "Work3", -129);
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR4_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR4_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI,
-                "DH4", "Work5", -131);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR3_BOOTPRI,
+                    "DH3", "Work4", -130);
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR5_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR5_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR5_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR5_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR5_BOOTPRI,
-                "DH5", "Work6", -132);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR4_BOOTPRI,
+                    "DH4", "Work5", -131);
 
-            addFilesystem2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_DIR6_PATH,
-                UaeOptionKeys.UAE_DRIVE_DIR6_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR6_VOLNAME,
-                UaeOptionKeys.UAE_DRIVE_DIR6_READONLY,
-                UaeOptionKeys.UAE_DRIVE_DIR6_BOOTPRI,
-                "DH6", "Work7", -133);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR5_BOOTPRI,
+                    "DH5", "Work6", -132);
 
-            // HDF mount (hardfile2)
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF0_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF0_READONLY,
-                "DH0",
-                0,
-                mKickstartRomFile,
-                romPath);
+                addFilesystem2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_PATH,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_VOLNAME,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_READONLY,
+                    UaeOptionKeys.UAE_DRIVE_DIR6_BOOTPRI,
+                    "DH6", "Work7", -133);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF1_READONLY,
-                "DH1",
-                1,
-                mKickstartRomFile,
-                romPath);
+                // HDF mount (hardfile2)
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF0_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF0_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF0_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF0_READONLY,
+                    "DH0",
+                    0,
+                    mKickstartRomFile,
+                    romPath);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF2_READONLY,
-                "DH2",
-                2,
-                mKickstartRomFile,
-                romPath);
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF1_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF1_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF1_READONLY,
+                    "DH1",
+                    1,
+                    mKickstartRomFile,
+                    romPath);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF3_READONLY,
-                "DH3",
-                3,
-                mKickstartRomFile,
-                romPath);
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF2_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF2_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF2_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF2_READONLY,
+                    "DH2",
+                    2,
+                    mKickstartRomFile,
+                    romPath);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF4_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF4_READONLY,
-                "DH4",
-                4,
-                mKickstartRomFile,
-                romPath);
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF3_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF3_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF3_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF3_READONLY,
+                    "DH3",
+                    3,
+                    mKickstartRomFile,
+                    romPath);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF5_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF5_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF5_READONLY,
-                "DH5",
-                5,
-                mKickstartRomFile,
-                romPath);
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF4_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF4_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF4_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF4_READONLY,
+                    "DH4",
+                    4,
+                    mKickstartRomFile,
+                    romPath);
 
-            needsUaeBootRom |= addHardfile2FromPrefs(args, p,
-                UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED,
-                UaeOptionKeys.UAE_DRIVE_HDF6_PATH,
-                UaeOptionKeys.UAE_DRIVE_HDF6_DEVNAME,
-                UaeOptionKeys.UAE_DRIVE_HDF6_READONLY,
-                "DH6",
-                6,
-                mKickstartRomFile,
-                romPath);
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF5_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF5_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF5_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF5_READONLY,
+                    "DH5",
+                    5,
+                    mKickstartRomFile,
+                    romPath);
+
+                needsUaeBootRom |= addHardfile2FromPrefs(args, p,
+                    UaeOptionKeys.UAE_DRIVE_HDF6_ENABLED,
+                    UaeOptionKeys.UAE_DRIVE_HDF6_PATH,
+                    UaeOptionKeys.UAE_DRIVE_HDF6_DEVNAME,
+                    UaeOptionKeys.UAE_DRIVE_HDF6_READONLY,
+                    "DH6",
+                    6,
+                    mKickstartRomFile,
+                    romPath);
+            }
         }
 
         // If any hardfile2 entry is using the "uae" controller, the uaehf.device driver must be

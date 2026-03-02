@@ -38,6 +38,7 @@ public class DrivesOptionsActivity extends Activity {
     private static final int REQ_PICK_DIR1 = 2004;
     private static final int REQ_PICK_DOS_FS = 2006;
     private static final int REQ_PICK_CD_BIN_FOLDER = 2007;
+    private static final int REQ_PICK_AGS_ROOT = 2008;
 
     // Pending CUE state when BIN tracks need to be fetched from a folder.
     private File mPendingCueFile;
@@ -75,6 +76,8 @@ public class DrivesOptionsActivity extends Activity {
     private CheckBox cbCdTurbo;
 
     private TextView tvDosFsPath;
+    private Switch swAgsAutoMountEnabled;
+    private TextView tvAgsBasePath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,6 +119,8 @@ public class DrivesOptionsActivity extends Activity {
         cbCdTurbo = findViewById(R.id.cbCdTurbo);
 
         tvDosFsPath = findViewById(R.id.tvDosFsPath);
+        swAgsAutoMountEnabled = findViewById(R.id.swAgsAutoMountEnabled);
+        tvAgsBasePath = findViewById(R.id.tvAgsBasePath);
 
         Button btnDir0Pick = findViewById(R.id.btnDir0Pick);
         Button btnDir0Clear = findViewById(R.id.btnDir0Clear);
@@ -133,6 +138,8 @@ public class DrivesOptionsActivity extends Activity {
 
         Button btnDosFsPick = findViewById(R.id.btnDosFsPick);
         Button btnDosFsClear = findViewById(R.id.btnDosFsClear);
+        Button btnAgsPathPick = findViewById(R.id.btnAgsPathPick);
+        Button btnAgsPathClear = findViewById(R.id.btnAgsPathClear);
 
         Button btnSave = findViewById(R.id.btnDrivesSave);
         Button btnBack = findViewById(R.id.btnDrivesBack);
@@ -170,6 +177,12 @@ public class DrivesOptionsActivity extends Activity {
         btnDosFsPick.setOnClickListener(v -> pickFile(REQ_PICK_DOS_FS, "*/*"));
         btnDosFsClear.setOnClickListener(v -> {
             clearDosFsModule();
+            refreshUiFromPrefs();
+        });
+
+        btnAgsPathPick.setOnClickListener(v -> pickDirectory(REQ_PICK_AGS_ROOT));
+        btnAgsPathClear.setOnClickListener(v -> {
+            clearAgsAutoMount();
             refreshUiFromPrefs();
         });
 
@@ -244,6 +257,11 @@ public class DrivesOptionsActivity extends Activity {
 
         String dosFs = prefs.getString(UaeOptionKeys.UAE_DRIVE_DOS_FS_MODULE_PATH, "");
         tvDosFsPath.setText(dosFs == null || dosFs.isEmpty() ? "(not set)" : dosFs);
+
+        boolean agsEnabled = prefs.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+        String agsBase = prefs.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, "");
+        swAgsAutoMountEnabled.setChecked(agsEnabled);
+        tvAgsBasePath.setText(agsBase == null || agsBase.isEmpty() ? "(not set)" : agsBase);
     }
 
     private void saveToPrefs() {
@@ -273,6 +291,15 @@ public class DrivesOptionsActivity extends Activity {
         e.putBoolean(UaeOptionKeys.UAE_DRIVE_MAP_CD_DRIVES, cbMapCdDrives.isChecked());
         e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD_TURBO, cbCdTurbo.isChecked());
 
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, swAgsAutoMountEnabled.isChecked());
+
+        e.apply();
+    }
+
+    private void clearAgsAutoMount() {
+        SharedPreferences.Editor e = prefs.edit();
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+        e.remove(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH);
         e.apply();
     }
 
@@ -471,6 +498,9 @@ public class DrivesOptionsActivity extends Activity {
                 if (out != null) {
                     prefs.edit().putString(UaeOptionKeys.UAE_DRIVE_DOS_FS_MODULE_PATH, out.getAbsolutePath()).apply();
                 }
+            } else if (requestCode == REQ_PICK_AGS_ROOT) {
+                String path = tryResolveToFilesystemPath(uri);
+                prefs.edit().putString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, path != null ? path : uri.toString()).apply();
             } else if (requestCode == REQ_PICK_DIR0 || requestCode == REQ_PICK_DIR1) {
                 // Directory mounts (filesystem2) currently require native directory support.
                 // We still store the tree URI so we can enable proper SAF-backed directory access later.
