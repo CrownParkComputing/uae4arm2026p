@@ -30,6 +30,7 @@ public class MemoryOptionsActivity extends Activity {
 
     private CheckBox mJitEnable;
     private CheckBox mRtgEnable;
+    private CheckBox mControllerMouseRemap;
     private Spinner mRtgVram;
     private LinearLayout mMemoryControls;
     private TextView mFixedMemoryNote;
@@ -194,6 +195,11 @@ public class MemoryOptionsActivity extends Activity {
             mRtgVram.setSelection(idx);
             mRtgVram.setEnabled(mRtgEnable == null || mRtgEnable.isChecked());
         }
+
+        if (mControllerMouseRemap != null) {
+            boolean remapMouse = p.getBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, false);
+            mControllerMouseRemap.setChecked(remapMouse);
+        }
     }
 
     private void save() {
@@ -212,6 +218,8 @@ public class MemoryOptionsActivity extends Activity {
         e.putInt(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB, MB_MB[mMbResMem.getSelectedItemPosition()]);
         e.putString(UaeOptionKeys.UAE_MEM_Z3MAPPING, z3MappingValues().get(mZ3Mapping.getSelectedItemPosition()));
         e.putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, mJitEnable != null && mJitEnable.isChecked());
+        e.putBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP,
+            mControllerMouseRemap != null && mControllerMouseRemap.isChecked());
 
         // RTG (Picasso96 / UAEGFX)
         boolean rtgEnabled = mRtgEnable != null && mRtgEnable.isChecked();
@@ -254,6 +262,7 @@ public class MemoryOptionsActivity extends Activity {
             .remove(UaeOptionKeys.UAE_JIT_ENABLED)
             .remove(UaeOptionKeys.UAE_GFXCARD_SIZE_MB)
             .remove(UaeOptionKeys.UAE_GFXCARD_TYPE)
+            .remove(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP)
             .apply();
         load();
     }
@@ -279,6 +288,7 @@ public class MemoryOptionsActivity extends Activity {
 
         mJitEnable = findViewById(R.id.chkJitEnable);
         mRtgEnable = findViewById(R.id.chkRtgEnable);
+        mControllerMouseRemap = findViewById(R.id.chkControllerMouseRemap);
         mRtgVram = findViewById(R.id.spinnerRtgVram);
 
         bindSpinners();

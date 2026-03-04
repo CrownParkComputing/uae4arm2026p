@@ -66,6 +66,11 @@ final class BootstrapMediaSwapperRows {
 
     static void addActionRow(Context context, LinearLayout root, String label, String buttonLabel,
                              Runnable onAction, Runnable beforePickerAction) {
+        addActionRow(context, root, label, buttonLabel, onAction, beforePickerAction, null);
+    }
+
+    static void addActionRow(Context context, LinearLayout root, String label, String buttonLabel,
+                             Runnable onAction, Runnable beforeAction, Runnable afterAction) {
         if (context == null || root == null) return;
         try {
             LinearLayout row = new LinearLayout(context);
@@ -80,11 +85,15 @@ final class BootstrapMediaSwapperRows {
             btn.setText(buttonLabel == null ? "Select" : buttonLabel);
             btn.setOnClickListener(v -> {
                 try {
-                    if (beforePickerAction != null) beforePickerAction.run();
+                    if (beforeAction != null) beforeAction.run();
                 } catch (Throwable ignored) {
                 }
                 try {
                     if (onAction != null) onAction.run();
+                } catch (Throwable ignored) {
+                }
+                try {
+                    if (afterAction != null) afterAction.run();
                 } catch (Throwable ignored) {
                 }
             });

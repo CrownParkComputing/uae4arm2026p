@@ -152,6 +152,13 @@
 
                 </LinearLayout>
 
+                <CheckBox
+                    android:id="@+id/chkControllerMouseRemap"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Joy/Mouse toggle (controller remap)" />
+
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

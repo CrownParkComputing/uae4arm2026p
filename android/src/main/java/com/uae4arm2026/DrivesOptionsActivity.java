@@ -82,7 +82,6 @@ public class DrivesOptionsActivity extends Activity {
     private Switch swAgsAutoMountEnabled;
     private TextView tvAgsBasePath;
     private TextView tvAgsMountPreview;
-    private android.view.View agsLegacySection;
     private boolean mAgsOrderedProfileReady;
 
     private static final class AgsOrderedMount {
@@ -155,7 +154,6 @@ public class DrivesOptionsActivity extends Activity {
         swAgsAutoMountEnabled = findViewById(R.id.swAgsAutoMountEnabled);
         tvAgsBasePath = findViewById(R.id.tvAgsBasePath);
         tvAgsMountPreview = findViewById(R.id.tvAgsMountPreview);
-        agsLegacySection = findViewById(R.id.agsLegacySection);
 
         Button btnDir0Pick = findViewById(R.id.btnDir0Pick);
         Button btnDir0Clear = findViewById(R.id.btnDir0Clear);
@@ -461,10 +459,6 @@ public class DrivesOptionsActivity extends Activity {
     private void applyAgsModeUi(boolean agsEnabled) {
         if (agsEnabled) {
             tvCd0Path.setText("(disabled by AGS auto-mount)");
-        }
-
-        if (agsLegacySection != null) {
-            agsLegacySection.setVisibility(agsEnabled ? android.view.View.GONE : android.view.View.VISIBLE);
         }
 
         int visibility = android.view.View.GONE;

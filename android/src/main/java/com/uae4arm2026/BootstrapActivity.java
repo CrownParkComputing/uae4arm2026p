@@ -213,15 +213,10 @@ public class BootstrapActivity extends Activity {
     private TextView mKickStatus;
     private android.widget.RadioButton[] mModelRadioButtons;
     private TextView mExtStatus;
-    private TextView mCd0Status;
     private TextView mDf0Status;
-    private TextView mDf1Status;
-    private TextView mDh0Status;
-    private TextView mDh1Status;
 
     private View mExtRomSection;
 
-    private View mDf1Controls;
     private boolean mDf1Added;
 
     private boolean mDf2Added;
@@ -229,7 +224,6 @@ public class BootstrapActivity extends Activity {
 
     private boolean mDh0Added;
 
-    private View mCd0Section;
     private View mBtnCdCorner;
     private boolean mCd0Added;
     private boolean mDh1Added;
@@ -242,7 +236,6 @@ public class BootstrapActivity extends Activity {
 
     private Integer mFloppySpeedWhenOpenedFromEmu;
 
-    private View mBtnExitTop;
     private View mBtnExitApp;
 
     private Spinner mQsModelSpinner;
@@ -446,6 +439,12 @@ public class BootstrapActivity extends Activity {
             this::mediaSwapperBeforePickerAction);
     }
 
+    private void addMediaSwapperLocalActionRow(android.widget.LinearLayout root, String label, String buttonLabel, Runnable onAction) {
+        BootstrapMediaSwapperRows.addActionRow(this, root, label, buttonLabel, onAction,
+            null,
+            this::mediaSwapperAfterLocalAction);
+    }
+
     private void addMediaSwapperRowWithClear(android.widget.LinearLayout root, String label, Runnable onSwap, String clearLabel, Runnable onClear) {
         BootstrapMediaSwapperRows.addRowWithClear(this, root, label, onSwap, clearLabel, onClear,
             this::mediaSwapperBeforePickerAction,
@@ -638,6 +637,77 @@ public class BootstrapActivity extends Activity {
             saveSourceNames();
             refreshStatus();
         } catch (Throwable ignored) {
+        }
+    }
+
+    private void swapDfIntoDf0(int fromDfIndex) {
+        if (fromDfIndex < 1 || fromDfIndex > 11) return;
+
+        try {
+            String fromKey = uaeDfPathKeyForIndex(fromDfIndex);
+            if (fromKey == null) return;
+
+            SharedPreferences prefs = uaePrefs();
+            String fromPath = normalizeMediaPath(prefs.getString(fromKey, ""));
+            if (fromPath.isEmpty()) {
+                Toast.makeText(this, "DF" + fromDfIndex + " is empty", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            String df0Path = normalizeMediaPath(prefs.getString(UaeOptionKeys.UAE_DRIVE_DF0_PATH, ""));
+
+            SharedPreferences.Editor edit = uaeEdit();
+            edit.putString(UaeOptionKeys.UAE_DRIVE_DF0_PATH, fromPath);
+            if (df0Path.isEmpty()) {
+                edit.remove(fromKey);
+            } else {
+                edit.putString(fromKey, df0Path);
+            }
+            edit.apply();
+
+            if (fromDfIndex == 1) {
+                File prevDf0 = mSelectedDf0;
+                String prevDf0Path = mSelectedDf0Path;
+                String prevDf0Source = mDf0SourceName;
+                mSelectedDf0 = mSelectedDf1;
+                mSelectedDf0Path = mSelectedDf1Path;
+                mDf0SourceName = mDf1SourceName;
+                mSelectedDf1 = prevDf0;
+                mSelectedDf1Path = prevDf0Path;
+                mDf1SourceName = prevDf0Source;
+                mDf1Added = true;
+                launcherEdit().putBoolean(PREF_SHOW_DF1, true).apply();
+            } else if (fromDfIndex == 2) {
+                File prevDf0 = mSelectedDf0;
+                String prevDf0Path = mSelectedDf0Path;
+                String prevDf0Source = mDf0SourceName;
+                mSelectedDf0 = mSelectedDf2;
+                mSelectedDf0Path = mSelectedDf2Path;
+                mDf0SourceName = mDf2SourceName;
+                mSelectedDf2 = prevDf0;
+                mSelectedDf2Path = prevDf0Path;
+                mDf2SourceName = prevDf0Source;
+                mDf2Added = true;
+                launcherEdit().putBoolean(PREF_SHOW_DF2, true).apply();
+            } else if (fromDfIndex == 3) {
+                File prevDf0 = mSelectedDf0;
+                String prevDf0Path = mSelectedDf0Path;
+                String prevDf0Source = mDf0SourceName;
+                mSelectedDf0 = mSelectedDf3;
+                mSelectedDf0Path = mSelectedDf3Path;
+                mDf0SourceName = mDf3SourceName;
+                mSelectedDf3 = prevDf0;
+                mSelectedDf3Path = prevDf0Path;
+                mDf3SourceName = prevDf0Source;
+                mDf3Added = true;
+                launcherEdit().putBoolean(PREF_SHOW_DF3, true).apply();
+            }
+
+            saveSourceNames();
+            refreshStatus();
+            Toast.makeText(this, "Swapped DF" + fromDfIndex + " into DF0", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Log.w(TAG, "Failed to swap DF" + fromDfIndex + " into DF0", t);
         }
     }
 
@@ -943,6 +1013,22 @@ public class BootstrapActivity extends Activity {
                     speedRow.addView(sp);
                     root.addView(speedRow);
                 } catch (Throwable ignored) {
+                }
+
+                final int maxDfSwapIndex = 11;
+                for (int dfIndex = 1; dfIndex <= maxDfSwapIndex; dfIndex++) {
+                    String key = uaeDfPathKeyForIndex(dfIndex);
+                    if (key == null) continue;
+                    String dfPathForSwap = normalizeMediaPath(getUaePrefString(key));
+                    if (!dfPathForSwap.isEmpty()) {
+                        final int moveFrom = dfIndex;
+                        addMediaSwapperLocalActionRow(
+                            root,
+                            "Move DF" + moveFrom + " disk into DF0",
+                            "Swap",
+                            () -> swapDfIntoDf0(moveFrom)
+                        );
+                    }
                 }
 
                 // Use source names (original user-facing filenames) rather than the internal
@@ -1878,13 +1964,6 @@ public class BootstrapActivity extends Activity {
 
     private void disableDirectMediaEditingControls() {
         int[] ids = new int[] {
-            R.id.btnPickDf0,
-            R.id.btnClearDf0,
-            R.id.btnPickDf1,
-            R.id.btnClearDf1,
-
-            R.id.btnPickCd0,
-            R.id.btnClearCd0,
         };
 
         for (int id : ids) {
@@ -3601,7 +3680,7 @@ public class BootstrapActivity extends Activity {
 
         // DH0 validation - only require HDF if user actually wants to boot from hard drive
         // Booting from floppy (DF0) is independent of hard drive configuration
-        if (!isCdOnly && !agsAutoMountEnabled && mDh0Added) {
+        if (!isCdOnly && !agsAutoMountEnabled && mDh0Added && !hasDf0()) {
             String mode = getDh0Mode();
             if (DH0_MODE_DIR.equals(mode)) {
                 if (mSelectedDh0Dir != null && (!mSelectedDh0Dir.exists() || !mSelectedDh0Dir.isDirectory())) {
@@ -3627,11 +3706,10 @@ public class BootstrapActivity extends Activity {
                     }
                 }
 
-                // Only prompt for HDF if user explicitly added DH0 but didn't select a file
+                // If DH0 has no selected path, treat it as "not mounted" and continue.
+                // This allows pressing Start with no DF/HD/LHA to boot to the BIOS/Kickstart screen.
                 if (hdfPath == null || hdfPath.trim().isEmpty()) {
-                    Toast.makeText(this, "Select a DH0 HDF before starting", Toast.LENGTH_SHORT).show();
-                    pickDh0Hdf();
-                    return;
+                    LogUtil.i(TAG, "DH0 marked as added but no HDF path is set; continuing without DH0");
                 } else if (!isReadableMediaPath(hdfPath)) {
                     if (isContentUriString(hdfPath)) {
                         showReselectDialog(
@@ -5840,49 +5918,7 @@ public class BootstrapActivity extends Activity {
 
     /** Build the model RadioGroup as two columns: main models left, CD32/CDTV right. */
     private void buildModelRadioGroup() {
-        android.widget.RadioGroup rg = findViewById(R.id.radioGroupModel);
-        if (rg == null) return;
-        rg.removeAllViews();
-        rg.setOrientation(LinearLayout.HORIZONTAL);
-
-        final float density = getResources().getDisplayMetrics().density;
-        int padPx = (int)(8 * density);
-        int minHeightPx = (int)(40 * density);
-
-        LinearLayout leftCol = new LinearLayout(this);
-        leftCol.setOrientation(LinearLayout.VERTICAL);
-        leftCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        LinearLayout rightCol = new LinearLayout(this);
-        rightCol.setOrientation(LinearLayout.VERTICAL);
-        rightCol.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
-
-        mModelRadioButtons = new android.widget.RadioButton[QS_MODELS.length];
-
-        for (int i = 0; i < QS_MODELS.length; i++) {
-            android.widget.RadioButton rb = new android.widget.RadioButton(this);
-            rb.setText(QS_MODELS[i].label);
-            rb.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            rb.setPadding(padPx, padPx, padPx, padPx);
-            rb.setMinHeight(minHeightPx);
-            rb.setMinimumHeight(minHeightPx);
-            rb.setId(View.generateViewId());
-            rb.setTag(i);
-            mModelRadioButtons[i] = rb;
-
-            final int idx = i;
-            rb.setOnClickListener(v -> selectModelRadio(idx));
-
-            // CD32 and CDTV (last 2) go to the right column
-            if (i >= QS_MODELS.length - 2) {
-                rightCol.addView(rb);
-            } else {
-                leftCol.addView(rb);
-            }
-        }
-
-        rg.addView(leftCol);
-        rg.addView(rightCol);
+        mModelRadioButtons = null;
     }
 
     /** Select a model radio button, deselect all others, and sync spinner + image. */
@@ -6708,22 +6744,6 @@ public class BootstrapActivity extends Activity {
             }
         }
 
-        if (mCd0Status != null) {
-            if (cdOnly || agsAutoMountEnabled) {
-                mCd0Status.setVisibility(View.GONE);
-            } else {
-                mCd0Status.setVisibility(View.VISIBLE);
-                if (hasCd0()) {
-                    String label = (mCd0SourceName != null && !mCd0SourceName.trim().isEmpty())
-                        ? mCd0SourceName
-                        : (mSelectedCd0 != null ? mSelectedCd0.getName() : "(CD image)");
-                    mCd0Status.setText("CD-ROM: " + label);
-                } else {
-                    mCd0Status.setText("CD-ROM: (not selected)");
-                }
-            }
-        }
-
         TextView insertedSummary = findViewById(R.id.txtInsertedMediaSummary);
         if (insertedSummary != null) {
             insertedSummary.setText(buildInsertedMediaSummary(cdOnly));
@@ -6732,26 +6752,9 @@ public class BootstrapActivity extends Activity {
         if (mDf0Status != null) {
             mDf0Status.setVisibility(View.GONE);
         }
-        if (mDf1Status != null) {
-            mDf1Status.setVisibility(View.GONE);
-        }
-
-        boolean showDf1Controls = !cdOnly && mDf1Added;
-        if (mDf1Controls != null) {
-            mDf1Controls.setVisibility(showDf1Controls ? View.VISIBLE : View.GONE);
-        }
-
-        View bootLabel = findViewById(R.id.txtBootMediumLabel);
-        View dh0Section = findViewById(R.id.dh0Section);
-
         View btnAgsPanel = findViewById(R.id.btnAgsPanel);
         View mediaActionsColumn = findViewById(R.id.mediaActionsColumn);
-        View cd0Section = findViewById(R.id.cd0Section);
         boolean agsReadyForDirectLaunch = isAgsReadyForDirectLaunch();
-
-        if (bootLabel != null) bootLabel.setVisibility(View.GONE);
-
-        boolean showDh0 = !cdOnly && !agsAutoMountEnabled && (mDh0Added || hasDh0());
 
         if (btnAgsPanel != null) {
             btnAgsPanel.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
@@ -6762,7 +6765,6 @@ public class BootstrapActivity extends Activity {
                 ((Button) btnAgsPanel).setText(agsReadyForDirectLaunch ? "AGS" : "AGS SETUP");
             }
         }
-        if (dh0Section != null) dh0Section.setVisibility(View.GONE);
 
         if (mediaActionsColumn instanceof LinearLayout) {
             ((LinearLayout) mediaActionsColumn).setGravity(cdOnly ? (Gravity.BOTTOM | Gravity.START) : Gravity.CENTER_HORIZONTAL);
@@ -6774,26 +6776,6 @@ public class BootstrapActivity extends Activity {
             }
         }
 
-        boolean showDh1Controls = showDh0 && (mDh1Added || hasDh1());
-
-        if (mDh0Status != null) {
-            mDh0Status.setVisibility(View.GONE);
-        }
-
-        if (mDh1Status != null) {
-            mDh1Status.setVisibility(View.GONE);
-        }
-
-        View btnPickDf0 = findViewById(R.id.btnPickDf0);
-        View btnClearDf0 = findViewById(R.id.btnClearDf0);
-        View btnPickDf1 = findViewById(R.id.btnPickDf1);
-        View btnClearDf1 = findViewById(R.id.btnClearDf1);
-        if (btnPickDf0 != null) btnPickDf0.setVisibility(View.GONE);
-        if (btnClearDf0 != null) btnClearDf0.setVisibility(View.GONE);
-        if (btnPickDf1 != null) btnPickDf1.setVisibility(View.GONE);
-        if (btnClearDf1 != null) btnClearDf1.setVisibility(View.GONE);
-
-        boolean showCd0 = !cdOnly && !agsAutoMountEnabled && mCd0Added;
         if (mBtnCdCorner != null) {
             mBtnCdCorner.setVisibility((cdOnly && !agsAutoMountEnabled) ? View.VISIBLE : View.GONE);
             if (mBtnCdCorner instanceof Button) {
@@ -6808,7 +6790,6 @@ public class BootstrapActivity extends Activity {
                 cdCorner.setMinHeight((int) (96 * density));
             }
         }
-        if (cd0Section != null) cd0Section.setVisibility(showCd0 ? View.VISIBLE : View.GONE);
 
         // When invoked from the emulator overlay, treat this screen as a "resume/restart" shell.
         // Do not re-sync boot media from the launcher UI, or we can overwrite runtime swaps.
@@ -6841,74 +6822,10 @@ public class BootstrapActivity extends Activity {
         return id;
     }
 
-    private String labelOrPath(String sourceName, File file, String path, String empty) {
-        if (sourceName != null && !sourceName.trim().isEmpty()) return sourceName.trim();
-        if (file != null) return file.getName();
-        if (path != null && !path.trim().isEmpty()) return path.trim();
-        return empty;
-    }
-
     private void updateSelectedDevicePanel(String baseModelId, boolean cdOnly) {
-        TextView deviceTitle = findViewById(R.id.txtSelectedDeviceTitle);
-        TextView deviceTree = findViewById(R.id.txtStatusSummary);
-
-        String modelLabel = "Amiga";
-        QsModel selected = getSelectedQsModel();
-        if (selected != null && selected.label != null && !selected.label.trim().isEmpty()) {
-            modelLabel = selected.label.trim();
-        } else if (baseModelId != null && !baseModelId.trim().isEmpty()) {
-            modelLabel = baseModelId.trim();
-        }
-
-        if (deviceTitle != null) {
-            deviceTitle.setText("Main device: " + modelLabel);
-        }
         // Update the model image and radio selection
         updateModelImage();
         syncRadioToSpinner();
-
-        if (deviceTree != null) {
-            // Build compact single-line status summary visible without scrolling.
-            StringBuilder sb = new StringBuilder();
-            if (cdOnly) {
-                sb.append("CD: ").append(hasCd0()
-                    ? labelOrPath(mCd0SourceName, mSelectedCd0, mSelectedCd0Path, "?")
-                    : "none");
-            } else {
-                // DF0 / DF1
-                sb.append("DF0: ").append(hasDf0()
-                    ? labelOrPath(mDf0SourceName, mSelectedDf0, mSelectedDf0Path, "?")
-                    : "---");
-                if (hasDf1()) {
-                    sb.append("  DF1: ").append(labelOrPath(mDf1SourceName, mSelectedDf1, mSelectedDf1Path, "?"));
-                }
-                // DH0 / DH1
-                if (hasDh0()) {
-                    sb.append("  DH0: ");
-                    if (DH0_MODE_DIR.equals(getDh0Mode())) {
-                        sb.append(labelOrPath(mDh0SourceName, null,
-                            mSelectedDh0Dir != null ? mSelectedDh0Dir.getAbsolutePath() : null, "?"));
-                    } else {
-                        sb.append(labelOrPath(mDh0SourceName, mSelectedDh0Hdf, mSelectedDh0HdfPath, "?"));
-                    }
-                }
-                if (hasDh1()) {
-                    sb.append("  DH1: ");
-                    if (DH1_MODE_DIR.equals(getDh1Mode())) {
-                        sb.append(labelOrPath(mDh1SourceName, null,
-                            mSelectedDh1Dir != null ? mSelectedDh1Dir.getAbsolutePath() : null, "?"));
-                    } else {
-                        sb.append(labelOrPath(mDh1SourceName, mSelectedDh1Hdf, mSelectedDh1HdfPath, "?"));
-                    }
-                }
-                // CD
-                if (hasCd0()) {
-                    sb.append("  CD: ").append(labelOrPath(mCd0SourceName, mSelectedCd0, mSelectedCd0Path, "?"));
-                }
-                if (sb.length() == 0) sb.append("No media connected");
-            }
-            deviceTree.setText(sb.toString());
-        }
     }
 
     @Override
@@ -7063,7 +6980,7 @@ public class BootstrapActivity extends Activity {
             if (mLaunchedFromEmulatorMenu && mOpenMediaSwapperOnStart) {
                 mReturnBar.setVisibility(View.GONE);
             } else {
-                // Keep return controls only for emulator-menu launch; avoid duplicate Exit on main launcher.
+                // Return controls are only relevant when launched from emulator menu.
                 mReturnBar.setVisibility(mLaunchedFromEmulatorMenu ? View.VISIBLE : View.GONE);
             }
         }
@@ -7125,44 +7042,14 @@ public class BootstrapActivity extends Activity {
             }
         }
 
-        Button btnConfigs = findViewById(R.id.btnConfigs);
-        if (btnConfigs != null) {
-            btnConfigs.setOnClickListener(v -> {
+        View btnConfigsTop = findViewById(R.id.btnConfigsTop);
+        if (btnConfigsTop != null) {
+            btnConfigsTop.setOnClickListener(v -> {
                 Intent i = new Intent(this, ConfigManagerActivity.class);
                 if (mLaunchedFromEmulatorMenu) {
                     i.putExtra(EXTRA_FROM_EMULATOR_MENU, true);
                 }
                 startActivity(i);
-            });
-        }
-
-        Button btnHelp = findViewById(R.id.btnHelp);
-        if (btnHelp != null) btnHelp.setOnClickListener(v -> startActivity(new Intent(this, HelpActivity.class)));
-
-        Button btnSetup = findViewById(R.id.btnSetup);
-        if (btnSetup != null) {
-            btnSetup.setOnClickListener(v -> {
-                Intent i = new Intent(this, WalkthroughActivity.class);
-                i.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
-                startActivity(i);
-            });
-        }
-
-        Button btnClearCache = findViewById(R.id.btnClearCache);
-        if (btnClearCache != null) {
-            btnClearCache.setOnClickListener(v -> {
-                new AlertDialog.Builder(this)
-                    .setTitle("Clear cache")
-                    .setMessage("This clears mounted media selections and launcher cache for a clean start. Imported files stay on disk.")
-                    .setPositiveButton("Clear", (d, w) -> {
-                        clearConnectedMediaForColdLauncherStart();
-                        syncMediaSelectionsFromUaePrefs();
-                        reconcileLauncherMediaVisibilityWithUaePrefs();
-                        refreshStatus();
-                        Toast.makeText(this, "Cache cleared", Toast.LENGTH_SHORT).show();
-                    })
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
             });
         }
 
@@ -7197,34 +7084,15 @@ public class BootstrapActivity extends Activity {
             startActivity(new Intent(this, InputOptionsActivity.class));
         });
 
-        mBtnExitTop = findViewById(R.id.btnExitTop);
-        if (mBtnExitTop != null) {
-            mBtnExitTop.setOnClickListener(v -> {
-                quitAppFully();
-            });
-        }
-
-        // Main Quickstart Exit button removed - exit is now via the return bar only
-
         mKickStatus = findViewById(R.id.txtKickStatus);
         mExtRomSection = findViewById(R.id.extRomSection);
         mExtStatus = findViewById(R.id.txtExtStatus);
-        mCd0Status = findViewById(R.id.txtCd0Status);
         mDf0Status = findViewById(R.id.txtDf0Status);
-        mDf1Status = findViewById(R.id.txtDf1Status);
-        mDh0Status = findViewById(R.id.txtDh0Status);
-        mDh1Status = findViewById(R.id.txtDh1Status);
 
         // DF selection is driven from the external-drive graphic touch points.
         if (mDf0Status != null) {
             mDf0Status.setOnClickListener(v -> onFloppySlotTapped(0));
         }
-        if (mDf1Status != null) {
-            mDf1Status.setOnClickListener(v -> onFloppySlotTapped(1));
-        }
-
-        mDf1Controls = findViewById(R.id.df1Controls);
-        mCd0Section = findViewById(R.id.cd0Section);
         mBtnCdCorner = findViewById(R.id.btnCdCorner);
 
         // When invoked from the emulator MENU overlay, do not allow direct media edits in-place.
@@ -7619,18 +7487,6 @@ public class BootstrapActivity extends Activity {
 
         // Kickstart button is now in Model section, no hidden buttons to manage
 
-        Button btnPickDf0 = findViewById(R.id.btnPickDf0);
-        if (btnPickDf0 != null) btnPickDf0.setOnClickListener(v -> onFloppySlotTapped(0));
-
-        Button btnPickDf1 = findViewById(R.id.btnPickDf1);
-        if (btnPickDf1 != null) btnPickDf1.setOnClickListener(v -> onFloppySlotTapped(1));
-
-        TextView dotDf1 = findViewById(R.id.dotDf1);
-        if (dotDf1 != null) dotDf1.setOnClickListener(v -> onFloppySlotTapped(1));
-
-        android.widget.ImageView selectedDeviceImage = findViewById(R.id.imgSelectedDevice);
-        // imgSelectedDevice is now a hidden stub
-
         // Amiga model image: tap = config dialog, long-press = DF0 insert/eject
         android.widget.ImageView imgAmigaModel = findViewById(R.id.imgAmigaModel);
         if (imgAmigaModel != null) {
@@ -7646,42 +7502,9 @@ public class BootstrapActivity extends Activity {
         if (df0StatusClick != null) {
             df0StatusClick.setOnClickListener(v -> onFloppySlotTapped(0));
         }
-        // DF1 status text tap target
-        TextView df1StatusClick = findViewById(R.id.txtDf1Status);
-        if (df1StatusClick != null) {
-            df1StatusClick.setOnClickListener(v -> onFloppySlotTapped(1));
-        }
-        android.widget.ImageView df0DriveImage = findViewById(R.id.imgDf0Drive);
-        if (df0DriveImage != null) {
-            df0DriveImage.setOnClickListener(v -> onFloppySlotTapped(0));
-        }
         View iconBtnKick = findViewById(R.id.iconBtnKick);
         if (iconBtnKick != null) {
             iconBtnKick.setOnClickListener(v -> showKickstartMapDialog());
-        }
-        View btnAddLha = findViewById(R.id.btnAddLha);
-        if (btnAddLha != null) {
-            btnAddLha.setOnClickListener(v -> startActivity(new Intent(this, LhaLibraryActivity.class)));
-        }
-
-        // External floppy image: single-click = insert disk, long-press = remove drive
-        android.widget.ImageView externalFloppyImage = findViewById(R.id.imgFloppyExternal);
-        if (externalFloppyImage != null) {
-            externalFloppyImage.setOnClickListener(v -> onFloppySlotTapped(1));
-            externalFloppyImage.setOnLongClickListener(v -> {
-                promptRemoveExternalDrive();
-                return true;
-            });
-        }
-
-        // Hard drive image: single-click = HD media options, long-press = remove
-        android.widget.ImageView hdImage = findViewById(R.id.imgHardDriveGraphic);
-        if (hdImage != null) {
-            hdImage.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_HD));
-            hdImage.setOnLongClickListener(v -> {
-                promptRemoveHardDrive();
-                return true;
-            });
         }
 
         if (mBtnCdCorner != null) {
@@ -7698,69 +7521,7 @@ public class BootstrapActivity extends Activity {
             if (btnClearExtRom != null) btnClearExtRom.setVisibility(View.GONE);
         } catch (Throwable ignored) { }
 
-        Button btnPickCd0 = findViewById(R.id.btnPickCd0);
-        if (btnPickCd0 != null) btnPickCd0.setOnClickListener(v -> pickCdImage0());
-
-        Button btnClearCd0 = findViewById(R.id.btnClearCd0);
-        if (btnClearCd0 != null) btnClearCd0.setOnClickListener(v -> {
-            deleteRecursive(getInternalCd0Dir());
-            mSelectedCd0 = null;
-            mSelectedCd0Path = null;
-            mCd0SourceName = null;
-            mCd0Added = false;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, false).apply();
-            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .remove(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)
-                .apply();
-            saveSourceNames();
-            refreshStatus();
-        });
-
-        Button btnClearDf0 = findViewById(R.id.btnClearDf0);
-        if (btnClearDf0 != null) {
-            btnClearDf0.setOnClickListener(v -> {
-                clearByPrefix(getInternalDisksDir(), "df0");
-                // DF0 swaps use a stable filename (disk.zip); clear it too.
-                try {
-                    clearFile(new File(getInternalDisksDir(), "disk.zip"));
-                } catch (Throwable ignored) {
-                }
-                mSelectedDf0 = null;
-                mDf0SourceName = null;
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .remove(UaeOptionKeys.UAE_DRIVE_DF0_PATH)
-                    .apply();
-                saveSourceNames();
-                refreshStatus();
-            });
-        }
-
-        Button btnClearDf1 = findViewById(R.id.btnClearDf1);
-        if (btnClearDf1 != null) {
-            btnClearDf1.setOnClickListener(v -> {
-                clearByPrefix(getInternalDisksDir(), "df1");
-                mSelectedDf1 = null;
-                mSelectedDf1Path = null;
-                mDf1SourceName = null;
-                mDf1Added = false;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, false).apply();
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .remove(UaeOptionKeys.UAE_DRIVE_DF1_PATH)
-                    .apply();
-                saveSourceNames();
-                refreshStatus();
-            });
-        }
-
         // DF2/DF3 controls were removed from the simplified Quickstart UI.
-
-        Button btnStart = findViewById(R.id.btnStart);
-        if (btnStart != null) {
-            btnStart.setVisibility(View.GONE);
-        }
 
         Button btnStartPanel = findViewById(R.id.btnStartPanel);
         if (btnStartPanel != null) {
@@ -8901,6 +8662,7 @@ public class BootstrapActivity extends Activity {
         if (dfIndex == 1) return UaeOptionKeys.UAE_DRIVE_DF1_PATH;
         if (dfIndex == 2) return UaeOptionKeys.UAE_DRIVE_DF2_PATH;
         if (dfIndex == 3) return UaeOptionKeys.UAE_DRIVE_DF3_PATH;
+        if (dfIndex >= 4 && dfIndex <= 11) return "uae_drive_df" + dfIndex + "_path";
         return null;
     }
 

@@ -66,8 +66,7 @@ public class InputOptionsActivity extends Activity {
         return p.contains(UaeOptionKeys.UAE_INPUT_PORT0_MODE)
             || p.contains(UaeOptionKeys.UAE_INPUT_PORT1_MODE)
             || p.contains(UaeOptionKeys.UAE_INPUT_MOUSE_SPEED)
-            || p.contains(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED)
-            || p.contains(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP);
+            || p.contains(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED);
     }
 
     private void setControlsEnabled(boolean enabled) {
@@ -76,6 +75,9 @@ public class InputOptionsActivity extends Activity {
         mPort1.setEnabled(enabled);
         mMouseSpeed.setEnabled(enabled);
         mAutofire.setEnabled(enabled);
+        if (mControllerMouseRemap != null) {
+            mControllerMouseRemap.setEnabled(true);
+        }
     }
 
     private void load() {
@@ -114,7 +116,7 @@ public class InputOptionsActivity extends Activity {
             e.remove(UaeOptionKeys.UAE_INPUT_PORT1_MODE);
             e.remove(UaeOptionKeys.UAE_INPUT_MOUSE_SPEED);
             e.remove(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED);
-            e.remove(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP);
+            e.putBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, mControllerMouseRemap.isChecked());
             e.apply();
             return;
         }

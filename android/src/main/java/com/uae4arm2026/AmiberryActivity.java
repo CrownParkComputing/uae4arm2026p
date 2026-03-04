@@ -2114,6 +2114,16 @@ public class AmiberryActivity extends SDLActivity {
         // Port 0 = joyport0 = Joy1 in Amiberry; Port 1 = joyport1 = Joy2.
         final String jn = (port == 0) ? "Joy1" : "Joy2";
         final String mn = (port == 0) ? "Mouse1" : "Mouse2";
+        switch (action.trim().toUpperCase()) {
+            case "MOUSE_UP":            return mn + " Up";
+            case "MOUSE_DOWN":          return mn + " Down";
+            case "MOUSE_LEFT":          return mn + " Left";
+            case "MOUSE_RIGHT":         return mn + " Right";
+            case "MOUSE_LEFT_BUTTON":   return mn + " Left Button";
+            case "MOUSE_RIGHT_BUTTON":  return mn + " Right Button";
+            case "MOUSE_MIDDLE_BUTTON": return mn + " Middle Button";
+            default: break;
+        }
         if (mouseMode) {
             switch (action.trim().toUpperCase()) {
                 case "UP":          return mn + " Up";
@@ -3177,6 +3187,32 @@ public class AmiberryActivity extends SDLActivity {
                 v.postDelayed(() -> {
                     try {
                         boolean active = nativeIsVkbdActive();
+                        if (active) {
+                            int currentAspect = 1;
+                            try {
+                                currentAspect = normalizeVideoAspectMode(nativeGetVideoAspectMode());
+                            } catch (Throwable ignored) {
+                                currentAspect = getSavedVideoAspectMode();
+                            }
+                            if (currentAspect == 0) {
+                                mAspectModeBeforeVkbd = 0;
+                                try {
+                                    nativeSetStretchToFill(true);
+                                    nativeSetVideoAspectMode(1);
+                                } catch (Throwable ignored) {
+                                }
+                                updateAspectButtonLabel(mAspectQuickButton, 1);
+                            }
+                        } else if (mAspectModeBeforeVkbd == 0) {
+                            try {
+                                nativeSetStretchToFill(false);
+                                nativeSetVideoAspectMode(0);
+                            } catch (Throwable ignored) {
+                            }
+                            updateAspectButtonLabel(mAspectQuickButton, 0);
+                            mAspectModeBeforeVkbd = -1;
+                        }
+
                         if (active && mVkbdTouchInterceptor != null) {
                             mVkbdTouchInterceptor.bringToFront();
                         }
@@ -3246,14 +3282,9 @@ public class AmiberryActivity extends SDLActivity {
             mPausedByOverlay = false;
             try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             try {
-                new AlertDialog.Builder(this)
-                    .setTitle("Return to launcher?")
-                    .setMessage("This stops the current emulation session and returns to setup.")
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Return", (dialog, which) -> coldRestartToSetupGui())
-                    .show();
+                coldRestartToSetupGui();
             } catch (Throwable t) {
-                Log.w(TAG, "Restart confirmation failed, continuing with restart: " + t);
+                Log.w(TAG, "Unable to cold restart from overlay button: " + t);
                 coldRestartToSetupGui();
             }
         });
@@ -3365,6 +3396,7 @@ public class AmiberryActivity extends SDLActivity {
     private Button mAspectQuickButton;
     private Button mWhdLhaQuickButton;
     private Button mHdQuickButton;
+    private int mAspectModeBeforeVkbd = -1;
     private android.graphics.drawable.GradientDrawable mDf0IndicatorBg;
     private android.graphics.drawable.GradientDrawable mDf1IndicatorBg;
     private android.graphics.drawable.GradientDrawable mDf2IndicatorBg;

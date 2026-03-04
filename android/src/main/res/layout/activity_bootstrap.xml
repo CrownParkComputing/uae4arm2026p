@@ -187,6 +187,16 @@
                         android:ellipsize="end"
                         android:visibility="visible" />
 
+                    <ImageButton
+                        android:id="@+id/btnConfigsTop"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="6dp"
+                        android:background="?android:attr/selectableItemBackgroundBorderless"
+                        android:contentDescription="Configs"
+                        android:padding="8dp"
+                        android:src="@android:drawable/ic_menu_manage" />
+
                 </LinearLayout>
 
                 <!-- Hidden quick-access buttons (kept for Java compat) -->
@@ -490,125 +500,7 @@
                     <TextView android:id="@+id/txtExtStatus" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Ext ROM: (not selected)" android:textSize="12sp" />
                 </LinearLayout>
 
-                <!-- Hidden stubs for Java R.id compat (old carousel/drive panels) -->
-                <RadioGroup android:id="@+id/radioGroupModel" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <ImageView android:id="@+id/imgDf0Drive" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <ImageView android:id="@+id/imgSelectedDevice" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <LinearLayout android:id="@+id/drivesRow" android:layout_width="1dp" android:layout_height="1dp" android:orientation="horizontal" android:visibility="gone" />
-                <LinearLayout android:id="@+id/floppyGraphicPanel" android:layout_width="1dp" android:layout_height="1dp" android:orientation="vertical" android:visibility="gone" />
-                <LinearLayout android:id="@+id/df1Controls" android:layout_width="1dp" android:layout_height="1dp" android:orientation="vertical" android:visibility="gone" />
-                <ImageView android:id="@+id/imgFloppyExternal" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <TextView android:id="@+id/txtDf1Status" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <TextView android:id="@+id/dotDf1" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <ImageView android:id="@+id/imgMiniDf1" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <LinearLayout android:id="@+id/hardDriveGraphicPanel" android:layout_width="1dp" android:layout_height="1dp" android:orientation="vertical" android:visibility="gone" />
-                <ImageView android:id="@+id/imgHardDriveGraphic" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <TextView android:id="@+id/dotDh0Graphic" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-
-                <!-- Hidden stub views for Java R.id compat -->
-                <Button android:id="@+id/btnPickDf0" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <Button android:id="@+id/btnClearDf0" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <Button android:id="@+id/btnPickDf1" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-                <Button android:id="@+id/btnClearDf1" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-
-                <!-- Selected device label + compact status (hidden, redundant with drive strip) -->
-                <TextView
-                    android:id="@+id/txtSelectedDeviceTitle"
-                    android:layout_width="1dp"
-                    android:layout_height="1dp"
-                    android:visibility="gone"
-                    android:text="Media" />
-
-                <TextView
-                    android:id="@+id/txtStatusSummary"
-                    android:layout_width="1dp"
-                    android:layout_height="1dp"
-                    android:visibility="gone"
-                    android:text="" />
-
-                <TextView
-                    android:id="@+id/txtBootMediumLabel"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:visibility="gone"
-                    android:text="Boot from"
-                    android:textStyle="bold" />
-
-                <LinearLayout
-                    android:id="@+id/dh0Section"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:id="@+id/txtDh0Status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingTop="12dp"
-                        android:text="DH0: (not selected)" />
-
-                    <TextView
-                        android:id="@+id/txtDh1Status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingTop="6dp"
-                        android:text="DH1: (not selected)" />
-
-                </LinearLayout>
-
-                <LinearLayout
-                    android:id="@+id/cd0Section"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:visibility="gone">
-
-                    <TextView
-                        android:id="@+id/txtCd0Status"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:paddingTop="6dp"
-                        android:text="CD-ROM: (not selected)" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal">
-
-                        <Button
-                            android:id="@+id/btnPickCd0"
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            style="@style/QuickButton"
-                            android:text="BIN/CUE/ISO" />
-
-                        <Button
-                            android:id="@+id/btnClearCd0"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            style="@style/QuickButton"
-                            android:text="Clear" />
-                    </LinearLayout>
-
-                </LinearLayout>
-
-                <Button
-                    android:id="@+id/btnAddLha"
-                    android:layout_width="1dp"
-                    android:layout_height="1dp"
-                    android:visibility="gone" />
-
             </LinearLayout>
-
-            <!-- Hidden stubs for Java compat (Configs/Setup/Help/Start/ClearCache/Hint) -->
-            <Button android:id="@+id/btnConfigs" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-            <Button android:id="@+id/btnSetup" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-            <Button android:id="@+id/btnHelp" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-            <Button android:id="@+id/btnStart" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-            <Button android:id="@+id/btnClearCache" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
-            <TextView android:id="@+id/txtHint" android:layout_width="1dp" android:layout_height="1dp" android:visibility="gone" />
 
             <LinearLayout
                 android:id="@+id/quickstartReturnBar"
@@ -640,14 +532,6 @@
                     android:textColor="#FFFFFF"
                     style="@style/QuickButtonPrimary"
                     android:text="Restart" />
-
-                <Button
-                    android:id="@+id/btnExitTop"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:text="Exit" />
 
             </LinearLayout>
 
