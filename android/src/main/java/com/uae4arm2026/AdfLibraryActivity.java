@@ -10,15 +10,16 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.DocumentsContract;
-import android.text.Editable;
-import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
+import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import android.widget.ListView;
 import android.widget.ProgressBar;
@@ -60,6 +61,10 @@ public class AdfLibraryActivity extends Activity {
     private static final String PREF_IGDB_QUERY_OVERRIDE_PREFIX = "igdb_query_override_";
     private static final String PREF_LIBRARY_HIDDEN_PREFIX = "library_hidden_";
     private static final String PREF_LIBRARY_GROUP_OVERRIDE_PREFIX = "library_group_override_";
+    private static final String PREF_LIBRARY_VIEW_MODE = "library_view_mode";
+    private static final int VIEW_MODE_LIST = 0;
+    private static final int VIEW_MODE_COVERS = 1;
+    private static final int VIEW_MODE_CAROUSEL = 2;
     private static final String TOSEC_BASE = "https://tosec.ikod.se";
     private static final int TOSEC_MODE_ALL = 0;
     private static final int TOSEC_MODE_AGA = 1;
@@ -71,16 +76,18 @@ public class AdfLibraryActivity extends Activity {
     private final Map<String, Bitmap> coverCache = new HashMap<>();
     private final Set<String> coverLoading = new HashSet<>();
 
-    private EditText searchInput;
-    private Button clearFilterBtn;
     private TextView diskCountView;
     private ProgressBar progress;
-    private Button refreshIgdbBtn;
-    private Button logsBtn;
-    private Button searchNewBtn;
+    private View refreshIgdbBtn;
+    private View logsBtn;
+    private View searchNewBtn;
+    private ImageButton viewModeBtn;
     private ListView listView;
+    private HorizontalScrollView carouselScroll;
+    private LinearLayout carouselStrip;
     private LibraryAdapter adapter;
     private int targetDf;
+    private int libraryViewMode = VIEW_MODE_LIST;
     private volatile String lastSyncNote;
 
     private static final class LibraryEntry {
@@ -104,12 +111,14 @@ public class AdfLibraryActivity extends Activity {
         final String title;
         final int diskNo;
         final int diskTotal;
+        String suggestedFileName;
 
         TosecResult(String token, String title, int diskNo, int diskTotal) {
             this.token = token;
             this.title = title;
             this.diskNo = diskNo;
             this.diskTotal = diskTotal;
+            this.suggestedFileName = null;
         }
     }
 
@@ -119,78 +128,32 @@ public class AdfLibraryActivity extends Activity {
         targetDf = Math.max(0, Math.min(3, getIntent().getIntExtra(EXTRA_TARGET_DF, 0)));
 
         setTitle("ADF Library (DF" + targetDf + ")");
+        libraryViewMode = getSavedLibraryViewMode();
         buildUi();
-        if (searchInput != null) {
-            searchInput.setText("");
-        }
         loadLibraryAsync();
     }
 
     private void buildUi() {
-        float d = getResources().getDisplayMetrics().density;
-
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(12), dp(10), dp(12), dp(8));
 
-        TextView title = new TextView(this);
-        title.setText("ADF Library");
-        title.setTextSize(20f);
-        title.setPadding(0, 0, 0, dp(6));
-
-        searchInput = new EditText(this);
-        searchInput.setHint("Search games");
-        searchInput.setSingleLine(true);
-
-        LinearLayout searchRow = new LinearLayout(this);
-        searchRow.setOrientation(LinearLayout.HORIZONTAL);
-        searchRow.setGravity(Gravity.CENTER_VERTICAL);
-
-        clearFilterBtn = new Button(this);
-        clearFilterBtn.setText("Clear");
-
-        searchRow.addView(searchInput, new LinearLayout.LayoutParams(
-            0,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            1f
-        ));
-        LinearLayout.LayoutParams clearLp = new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        clearLp.leftMargin = dp(8);
-        searchRow.addView(clearFilterBtn, clearLp);
-
-        diskCountView = new TextView(this);
-        diskCountView.setTextSize(12f);
-        diskCountView.setPadding(0, dp(4), 0, dp(2));
-        diskCountView.setText("Showing 0 of 0 disks");
-
         LinearLayout topRow = new LinearLayout(this);
         topRow.setOrientation(LinearLayout.HORIZONTAL);
-        topRow.setGravity(Gravity.CENTER_VERTICAL);
-        topRow.setPadding(0, dp(8), 0, dp(8));
+        topRow.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+        topRow.setPadding(0, 0, 0, dp(8));
 
-        refreshIgdbBtn = new Button(this);
-        refreshIgdbBtn.setText("Refresh IGDB Data");
-        topRow.addView(refreshIgdbBtn, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        searchNewBtn = createTopIconButton(android.R.drawable.ic_menu_search, "Search New ADF", v -> promptAndSearchNewAdf());
+        topRow.addView(searchNewBtn);
 
-        searchNewBtn = new Button(this);
-        searchNewBtn.setText("Search New ADF");
-        topRow.addView(searchNewBtn, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        viewModeBtn = createTopIconButton(android.R.drawable.ic_menu_sort_by_size, "Toggle Library View", v -> cycleLibraryViewMode());
+        topRow.addView(viewModeBtn);
 
-        logsBtn = new Button(this);
-        logsBtn.setText("Logs");
-        topRow.addView(logsBtn, new LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
+        refreshIgdbBtn = createTopIconButton(android.R.drawable.ic_popup_sync, "Refresh IGDB Data", v -> enrichFromIgdbAsync(true));
+        topRow.addView(refreshIgdbBtn);
+
+        logsBtn = createTopIconButton(android.R.drawable.ic_menu_info_details, "Logs", v -> startActivity(new Intent(this, LogsActivity.class)));
+        topRow.addView(logsBtn);
 
         progress = new ProgressBar(this);
         progress.setVisibility(View.GONE);
@@ -198,15 +161,49 @@ public class AdfLibraryActivity extends Activity {
         p.leftMargin = dp(10);
         topRow.addView(progress, p);
 
+        TextView title = new TextView(this);
+        title.setText("ADF Library");
+        title.setTextSize(20f);
+        title.setPadding(0, 0, 0, dp(6));
+
+        diskCountView = new TextView(this);
+        diskCountView.setTextSize(12f);
+        diskCountView.setPadding(0, dp(4), 0, dp(2));
+        diskCountView.setText("Showing 0 of 0 disks");
+
         listView = new ListView(this);
         adapter = new LibraryAdapter();
         listView.setAdapter(adapter);
 
-        root.addView(title);
-        root.addView(searchRow);
-        root.addView(diskCountView);
+        carouselStrip = new LinearLayout(this);
+        carouselStrip.setOrientation(LinearLayout.HORIZONTAL);
+        carouselStrip.setGravity(Gravity.CENTER_VERTICAL);
+        carouselStrip.setPadding(dp(4), dp(4), dp(4), dp(4));
+
+        carouselScroll = new HorizontalScrollView(this);
+        carouselScroll.setHorizontalScrollBarEnabled(true);
+        carouselScroll.setFillViewport(true);
+        carouselScroll.addView(carouselStrip, new ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.WRAP_CONTENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        FrameLayout contentHost = new FrameLayout(this);
+        contentHost.addView(listView, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+        contentHost.addView(carouselScroll, new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ));
+
+        applyLibraryViewModeUi();
+
         root.addView(topRow);
-        root.addView(listView, new LinearLayout.LayoutParams(
+        root.addView(title);
+        root.addView(diskCountView);
+        root.addView(contentHost, new LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             0,
             1f
@@ -214,75 +211,173 @@ public class AdfLibraryActivity extends Activity {
 
         setContentView(root);
 
-        searchInput.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                applyFilter();
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-            }
-        });
-
-        refreshIgdbBtn.setOnClickListener(v -> enrichFromIgdbAsync(true));
-        logsBtn.setOnClickListener(v -> startActivity(new Intent(this, LogsActivity.class)));
-        searchNewBtn.setOnClickListener(v -> promptAndSearchNewAdf());
-        clearFilterBtn.setOnClickListener(v -> {
-            if (searchInput.getText() != null) {
-                searchInput.getText().clear();
-            } else {
-                searchInput.setText("");
-            }
-            applyFilter();
-        });
-
         listView.setOnItemClickListener((parent, view, position, id) -> {
             if (position < 0 || position >= filteredEntries.size()) return;
-            LibraryEntry selected = filteredEntries.get(position);
-            ArrayList<LibraryEntry> group = visibleGroups.get(selected.file.getAbsolutePath());
-            if (group == null || group.isEmpty()) {
-                group = new ArrayList<>();
-                group.add(selected);
-            }
-            group.sort((a, b) -> Integer.compare(extractDiskNo(a), extractDiskNo(b)));
-
-            LibraryEntry firstDisk = group.get(0);
-            for (LibraryEntry entry : group) {
-                int diskNo = extractDiskNo(entry);
-                if (diskNo == 1) {
-                    firstDisk = entry;
-                    break;
-                }
-            }
-
-            ArrayList<String> additional = new ArrayList<>();
-            for (LibraryEntry entry : group) {
-                if (entry == null || entry.file == null) continue;
-                if (entry.file.equals(firstDisk.file)) continue;
-                additional.add(entry.file.getAbsolutePath());
-            }
-
-            Intent out = new Intent();
-            out.putExtra(EXTRA_TARGET_DF, targetDf);
-            out.putExtra(EXTRA_SELECTED_PATH, firstDisk.file.getAbsolutePath());
-            out.putExtra(EXTRA_SELECTED_TITLE, firstDisk.title);
-            out.putExtra(EXTRA_ADDITIONAL_PATHS, additional.toArray(new String[0]));
-            out.setData(Uri.fromFile(firstDisk.file));
-            setResult(RESULT_OK, out);
-            finish();
+            onEntrySelected(filteredEntries.get(position));
         });
 
         listView.setOnItemLongClickListener((parent, view, position, id) -> {
             if (position < 0 || position >= filteredEntries.size()) return true;
-            LibraryEntry selected = filteredEntries.get(position);
-            promptEntryActions(selected);
+            promptEntryActions(filteredEntries.get(position));
             return true;
         });
+    }
+
+    private void onEntrySelected(LibraryEntry selected) {
+        if (selected == null || selected.file == null) return;
+        ArrayList<LibraryEntry> group = visibleGroups.get(selected.file.getAbsolutePath());
+        if (group == null || group.isEmpty()) {
+            group = new ArrayList<>();
+            group.add(selected);
+        }
+        group.sort((a, b) -> Integer.compare(extractDiskNo(a), extractDiskNo(b)));
+
+        LibraryEntry firstDisk = group.get(0);
+        for (LibraryEntry entry : group) {
+            int diskNo = extractDiskNo(entry);
+            if (diskNo == 1) {
+                firstDisk = entry;
+                break;
+            }
+        }
+
+        ArrayList<String> additional = new ArrayList<>();
+        for (LibraryEntry entry : group) {
+            if (entry == null || entry.file == null) continue;
+            if (entry.file.equals(firstDisk.file)) continue;
+            additional.add(entry.file.getAbsolutePath());
+        }
+
+        Intent out = new Intent();
+        out.putExtra(EXTRA_TARGET_DF, targetDf);
+        out.putExtra(EXTRA_SELECTED_PATH, firstDisk.file.getAbsolutePath());
+        out.putExtra(EXTRA_SELECTED_TITLE, firstDisk.title);
+        out.putExtra(EXTRA_ADDITIONAL_PATHS, additional.toArray(new String[0]));
+        out.setData(Uri.fromFile(firstDisk.file));
+        setResult(RESULT_OK, out);
+        finish();
+    }
+
+    private ImageButton createTopIconButton(int iconRes, String contentDescription, View.OnClickListener listener) {
+        ImageButton button = new ImageButton(this);
+        button.setImageResource(iconRes);
+        button.setBackground(null);
+        button.setContentDescription(contentDescription);
+        button.setOnClickListener(listener);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        lp.rightMargin = dp(8);
+        button.setLayoutParams(lp);
+        return button;
+    }
+
+    private int getSavedLibraryViewMode() {
+        try {
+            int mode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(PREF_LIBRARY_VIEW_MODE, VIEW_MODE_LIST);
+            if (mode < VIEW_MODE_LIST || mode > VIEW_MODE_CAROUSEL) return VIEW_MODE_LIST;
+            return mode;
+        } catch (Throwable ignored) {
+            return VIEW_MODE_LIST;
+        }
+    }
+
+    private void setSavedLibraryViewMode(int mode) {
+        try {
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putInt(PREF_LIBRARY_VIEW_MODE, mode).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void cycleLibraryViewMode() {
+        libraryViewMode++;
+        if (libraryViewMode > VIEW_MODE_CAROUSEL) {
+            libraryViewMode = VIEW_MODE_LIST;
+        }
+        setSavedLibraryViewMode(libraryViewMode);
+        applyLibraryViewModeUi();
+        if (adapter != null) adapter.notifyDataSetChanged();
+
+        String label = libraryViewMode == VIEW_MODE_LIST
+            ? "List view"
+            : (libraryViewMode == VIEW_MODE_COVERS ? "Covers view" : "Carousel view");
+        Toast.makeText(this, label, Toast.LENGTH_SHORT).show();
+    }
+
+    private void applyLibraryViewModeUi() {
+        if (viewModeBtn != null) {
+            if (libraryViewMode == VIEW_MODE_LIST) {
+                viewModeBtn.setImageResource(android.R.drawable.ic_menu_sort_by_size);
+                viewModeBtn.setContentDescription("View mode: List");
+            } else if (libraryViewMode == VIEW_MODE_COVERS) {
+                viewModeBtn.setImageResource(android.R.drawable.ic_menu_gallery);
+                viewModeBtn.setContentDescription("View mode: Covers");
+            } else {
+                viewModeBtn.setImageResource(android.R.drawable.ic_menu_slideshow);
+                viewModeBtn.setContentDescription("View mode: Carousel");
+            }
+        }
+        if (listView != null) {
+            listView.setDividerHeight(libraryViewMode == VIEW_MODE_COVERS ? dp(2) : dp(6));
+            listView.setVisibility(libraryViewMode == VIEW_MODE_CAROUSEL ? View.GONE : View.VISIBLE);
+        }
+        if (carouselScroll != null) {
+            carouselScroll.setVisibility(libraryViewMode == VIEW_MODE_CAROUSEL ? View.VISIBLE : View.GONE);
+            if (libraryViewMode == VIEW_MODE_CAROUSEL) {
+                rebuildCarouselStrip();
+            }
+        }
+    }
+
+    private void rebuildCarouselStrip() {
+        if (carouselStrip == null) return;
+        carouselStrip.removeAllViews();
+        if (filteredEntries.isEmpty()) return;
+
+        for (LibraryEntry e : filteredEntries) {
+            if (e == null) continue;
+
+            LinearLayout card = new LinearLayout(this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setGravity(Gravity.CENTER_HORIZONTAL);
+            card.setPadding(dp(8), dp(8), dp(8), dp(8));
+
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(dp(210), ViewGroup.LayoutParams.MATCH_PARENT);
+            cardLp.rightMargin = dp(8);
+
+            ImageView cover = new ImageView(this);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams coverLp = new LinearLayout.LayoutParams(dp(180), dp(240));
+            card.addView(cover, coverLp);
+
+            TextView title = new TextView(this);
+            title.setTextSize(15f);
+            title.setMaxLines(2);
+            title.setGravity(Gravity.CENTER_HORIZONTAL);
+            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            titleLp.topMargin = dp(6);
+            card.addView(title, titleLp);
+
+            String t = (e.title == null || e.title.trim().isEmpty()) ? e.fileName : e.title;
+            ArrayList<LibraryEntry> group = visibleGroups.get(e.file.getAbsolutePath());
+            int groupCount = group == null ? 1 : group.size();
+            boolean aga = isAgaGroup(group) || isAgaEntry(e);
+            if (groupCount > 1) {
+                t = stripDiskMarker(t) + " (" + groupCount + " disks)";
+            }
+            if (aga && !containsAgaMarker(t)) {
+                t = t + " [AGA]";
+            }
+            title.setText(t);
+
+            bindCover(cover, e.coverUrl);
+
+            card.setOnClickListener(v -> onEntrySelected(e));
+            card.setOnLongClickListener(v -> {
+                promptEntryActions(e);
+                return true;
+            });
+
+            carouselStrip.addView(card, cardLp);
+        }
     }
 
     private void promptEntryActions(LibraryEntry selected) {
@@ -512,11 +607,10 @@ public class AdfLibraryActivity extends Activity {
         new Thread(() -> {
             ArrayList<LibraryEntry> loaded = new ArrayList<>();
             try {
-                File base = AppPaths.getBaseDir(this);
-                File disks = new File(base, "disks");
-                ensureDir(disks);
-                syncConfiguredFloppiesToInternal(disks);
-                collectDiskEntriesRecursive(disks, loaded);
+                File disks = resolveLibraryDiskRoot();
+                if (disks != null) {
+                    collectDiskEntriesRecursive(disks, loaded);
+                }
             } catch (Throwable ignored) {
             }
 
@@ -537,6 +631,35 @@ public class AdfLibraryActivity extends Activity {
                 }
             });
         }).start();
+    }
+
+    private File resolveLibraryDiskRoot() {
+        try {
+            SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String floppiesUri = prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null);
+            String parentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
+
+            File fsRoot = resolvePrimaryFilesystemFloppiesDir(floppiesUri, parentTreeUri);
+            if (fsRoot != null && fsRoot.exists() && fsRoot.isDirectory()) {
+                lastSyncNote = "Library root: " + fsRoot.getAbsolutePath();
+                return fsRoot;
+            }
+
+            File base = AppPaths.getBaseDir(this);
+            File internalDisks = new File(base, "disks");
+            ensureDir(internalDisks);
+            syncConfiguredFloppiesToInternal(internalDisks);
+            return internalDisks;
+        } catch (Throwable t) {
+            try {
+                File base = AppPaths.getBaseDir(this);
+                File internalDisks = new File(base, "disks");
+                ensureDir(internalDisks);
+                return internalDisks;
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
     }
 
     private void collectDiskEntriesRecursive(File dir, ArrayList<LibraryEntry> out) {
@@ -1369,7 +1492,8 @@ public class AdfLibraryActivity extends Activity {
         ArrayList<String> keys = new ArrayList<>(variants.keySet());
         keys.sort(String::compareToIgnoreCase);
         if (keys.size() == 1) {
-            downloadTosecVariantAsync(variants.get(keys.get(0)), keys.get(0));
+            String key = keys.get(0);
+            chooseTosecDisks(gameKey, key, variants.get(key));
             return;
         }
 
@@ -1385,10 +1509,100 @@ public class AdfLibraryActivity extends Activity {
             .setItems(labels, (d, which) -> {
                 if (which < 0 || which >= keys.size()) return;
                 String key = keys.get(which);
-                downloadTosecVariantAsync(variants.get(key), key);
+                chooseTosecDisks(gameKey, key, variants.get(key));
             })
             .setNegativeButton("Cancel", null)
             .show();
+    }
+
+    private void chooseTosecDisks(String gameKey, String variantLabel, ArrayList<TosecResult> variant) {
+        if (variant == null || variant.isEmpty()) return;
+
+        ArrayList<TosecResult> sorted = new ArrayList<>(variant);
+        sorted.sort((a, b) -> {
+            int da = a == null ? Integer.MAX_VALUE : (a.diskNo <= 0 ? Integer.MAX_VALUE : a.diskNo);
+            int db = b == null ? Integer.MAX_VALUE : (b.diskNo <= 0 ? Integer.MAX_VALUE : b.diskNo);
+            if (da != db) return Integer.compare(da, db);
+            String ta = a == null || a.title == null ? "" : a.title;
+            String tb = b == null || b.title == null ? "" : b.title;
+            return ta.compareToIgnoreCase(tb);
+        });
+
+        progress.setVisibility(View.VISIBLE);
+        setTopActionsEnabled(false);
+
+        new Thread(() -> {
+            for (TosecResult item : sorted) {
+                if (item == null) continue;
+                if (item.suggestedFileName != null && !item.suggestedFileName.trim().isEmpty()) continue;
+                try {
+                    item.suggestedFileName = fetchTosecRemoteFileName(item);
+                } catch (Throwable ignored) {
+                }
+            }
+
+            runOnUiThread(() -> {
+                progress.setVisibility(View.GONE);
+                setTopActionsEnabled(true);
+                showTosecDiskPickerDialog(gameKey, variantLabel, sorted);
+            });
+        }).start();
+    }
+
+    private void showTosecDiskPickerDialog(String gameKey, String variantLabel, ArrayList<TosecResult> sorted) {
+        if (sorted == null || sorted.isEmpty()) return;
+
+        String[] labels = new String[sorted.size()];
+        boolean[] checked = new boolean[sorted.size()];
+        for (int i = 0; i < sorted.size(); i++) {
+            TosecResult r = sorted.get(i);
+            checked[i] = false;
+            if (r == null) {
+                labels[i] = "(unknown)";
+                continue;
+            }
+
+            String diskLabel;
+            if (r.diskNo > 0 && r.diskTotal > 0) {
+                diskLabel = "Disk " + r.diskNo + " of " + r.diskTotal;
+            } else if (r.diskNo > 0) {
+                diskLabel = "Disk " + r.diskNo;
+            } else {
+                diskLabel = "File";
+            }
+            String fileNameLabel = tosecFileNameLabel(r);
+            labels[i] = diskLabel + " — " + fileNameLabel;
+        }
+
+        String title = "Select Disks: " + gameKey;
+        if (variantLabel != null && !variantLabel.trim().isEmpty() && !variantLabel.equals(gameKey)) {
+            title += "\n" + variantLabel;
+        }
+
+        new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMultiChoiceItems(labels, checked, (d, which, isChecked) -> checked[which] = isChecked)
+            .setPositiveButton("Download", (d, w) -> {
+                ArrayList<TosecResult> selected = new ArrayList<>();
+                for (int i = 0; i < sorted.size(); i++) {
+                    if (!checked[i]) continue;
+                    TosecResult item = sorted.get(i);
+                    if (item != null) selected.add(item);
+                }
+                if (selected.isEmpty()) {
+                    Toast.makeText(this, "Select at least one disk/file", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                downloadTosecVariantAsync(selected, variantLabel == null ? gameKey : variantLabel);
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void setTopActionsEnabled(boolean enabled) {
+        if (searchNewBtn != null) searchNewBtn.setEnabled(enabled);
+        if (refreshIgdbBtn != null) refreshIgdbBtn.setEnabled(enabled);
+        if (logsBtn != null) logsBtn.setEnabled(enabled);
     }
 
     private void downloadTosecAsync(TosecResult item) {
@@ -1483,23 +1697,18 @@ public class AdfLibraryActivity extends Activity {
             throw new IllegalStateException("HTTP " + code);
         }
 
-        String fileName = null;
-        String cd = conn.getHeaderField("Content-Disposition");
-        if (cd != null) {
-            int idx = cd.toLowerCase(Locale.ROOT).indexOf("filename=");
-            if (idx >= 0) {
-                fileName = cd.substring(idx + 9).trim();
-                if (fileName.startsWith("\"") && fileName.endsWith("\"") && fileName.length() > 1) {
-                    fileName = fileName.substring(1, fileName.length() - 1);
-                }
-            }
+        String fileName = extractFileNameFromContentDisposition(conn.getHeaderField("Content-Disposition"));
+        if ((fileName == null || fileName.trim().isEmpty()) && item != null && item.suggestedFileName != null) {
+            fileName = item.suggestedFileName;
         }
         if (fileName == null || fileName.trim().isEmpty()) {
             fileName = sanitizeFileName(item.title) + ".zip";
         }
 
-        File base = AppPaths.getBaseDir(this);
-        File disks = new File(base, "disks");
+        File disks = resolveLibraryDiskRoot();
+        if (disks == null) {
+            throw new IllegalStateException("Unable to resolve library folder");
+        }
         ensureDir(disks);
         File out = uniqueFile(new File(disks, fileName));
 
@@ -1520,6 +1729,71 @@ public class AdfLibraryActivity extends Activity {
             throw new IllegalStateException("Downloaded file empty");
         }
         return out;
+    }
+
+    private String fetchTosecRemoteFileName(TosecResult item) throws Exception {
+        if (item == null || item.token == null || item.token.trim().isEmpty()) {
+            return null;
+        }
+        String u = TOSEC_BASE + "/download.php?tosec=" + URLEncoder.encode(item.token.trim(), "UTF-8");
+        HttpURLConnection conn = (HttpURLConnection) new URL(u).openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(10000);
+        conn.setReadTimeout(10000);
+        conn.setRequestProperty("User-Agent", "uae4arm_2026/1.0");
+        conn.setRequestProperty("Range", "bytes=0-0");
+
+        try {
+            int code = conn.getResponseCode();
+            if ((code < 200 || code >= 300) && code != 206) {
+                return null;
+            }
+            String fromHeader = extractFileNameFromContentDisposition(conn.getHeaderField("Content-Disposition"));
+            if (fromHeader != null && !fromHeader.trim().isEmpty()) {
+                return fromHeader;
+            }
+            return null;
+        } finally {
+            try {
+                InputStream in = conn.getInputStream();
+                if (in != null) in.close();
+            } catch (Throwable ignored) {
+            }
+            conn.disconnect();
+        }
+    }
+
+    private String extractFileNameFromContentDisposition(String contentDisposition) {
+        if (contentDisposition == null || contentDisposition.trim().isEmpty()) return null;
+        String cd = contentDisposition;
+
+        Matcher quoted = Pattern.compile("(?i)filename\\*=UTF-8''([^;]+)|filename=\\\"([^\\\"]+)\\\"|filename=([^;]+)").matcher(cd);
+        if (quoted.find()) {
+            String value = quoted.group(1);
+            if (value == null || value.trim().isEmpty()) value = quoted.group(2);
+            if (value == null || value.trim().isEmpty()) value = quoted.group(3);
+            if (value != null) {
+                value = value.trim();
+                if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
+                    value = value.substring(1, value.length() - 1);
+                }
+                try {
+                    value = java.net.URLDecoder.decode(value, "UTF-8");
+                } catch (Throwable ignored) {
+                }
+                if (!value.isEmpty()) return value;
+            }
+        }
+
+        int idx = cd.toLowerCase(Locale.ROOT).indexOf("filename=");
+        if (idx >= 0) {
+            String value = cd.substring(idx + 9).trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() > 1) {
+                value = value.substring(1, value.length() - 1);
+            }
+            if (!value.isEmpty()) return value;
+        }
+        return null;
     }
 
     private File uniqueFile(File initial) {
@@ -1561,7 +1835,7 @@ public class AdfLibraryActivity extends Activity {
     }
 
     private void applyFilter() {
-        String q = searchInput.getText() == null ? "" : searchInput.getText().toString().trim().toLowerCase(Locale.ROOT);
+        String q = "";
         filteredEntries.clear();
         visibleGroups.clear();
 
@@ -1609,6 +1883,9 @@ public class AdfLibraryActivity extends Activity {
         });
         updateDiskCountSummary();
         adapter.notifyDataSetChanged();
+        if (libraryViewMode == VIEW_MODE_CAROUSEL) {
+            rebuildCarouselStrip();
+        }
     }
 
     private void updateDiskCountSummary() {
@@ -1618,13 +1895,23 @@ public class AdfLibraryActivity extends Activity {
             if (group == null) continue;
             visibleDiskCount += group.size();
         }
-        int totalDiskCount = allEntries.size();
-        String query = searchInput.getText() == null ? "" : searchInput.getText().toString().trim();
-        if (query.isEmpty()) {
-            diskCountView.setText("Showing " + visibleDiskCount + " disks");
-        } else {
-            diskCountView.setText("Showing " + visibleDiskCount + " of " + totalDiskCount + " disks");
+        diskCountView.setText("Showing " + visibleDiskCount + " disks");
+    }
+
+    private String tosecFileNameLabel(TosecResult result) {
+        if (result == null || result.title == null) return "";
+        if (result.suggestedFileName != null && !result.suggestedFileName.trim().isEmpty()) {
+            return result.suggestedFileName.trim();
         }
+        String label = result.title.trim();
+        if (label.isEmpty()) return "";
+        String fallback = sanitizeFileName(label) + ".zip";
+        if (result.token != null && !result.token.trim().isEmpty()) {
+            String token = result.token.trim();
+            if (token.length() > 8) token = token.substring(token.length() - 8);
+            fallback += " [" + token + "]";
+        }
+        return fallback;
     }
 
     private LibraryEntry pickRepresentativeDisk(ArrayList<LibraryEntry> group) {
@@ -1674,6 +1961,20 @@ public class AdfLibraryActivity extends Activity {
         if (override != null && !override.trim().isEmpty()) {
             return override.trim().toLowerCase(Locale.ROOT);
         }
+
+        int[] diskMeta = extractDiskMeta(entry.title);
+        if (diskMeta[1] <= 1) {
+            diskMeta = extractDiskMeta(entry.fileName);
+        }
+        boolean isExplicitMultiDisk = diskMeta[0] > 0 && diskMeta[1] > 1;
+        if (!isExplicitMultiDisk) {
+            String single = entry.fileName == null ? "" : entry.fileName.trim().toLowerCase(Locale.ROOT);
+            if (single.isEmpty() && entry.file != null) {
+                single = entry.file.getAbsolutePath().toLowerCase(Locale.ROOT);
+            }
+            return "single::" + single;
+        }
+
         String pretty = derivePrettyTitle(entry.fileName);
         String key = prefixBeforeDiskMarker(pretty);
         if (key == null || key.trim().isEmpty()) {
@@ -1754,9 +2055,9 @@ public class AdfLibraryActivity extends Activity {
     }
 
     private String variantKeyForTosec(String title) {
-        String key = prefixBeforeDiskMarker(title == null ? "" : title);
+        String key = stripDiskMarker(title == null ? "" : title);
         if (key == null || key.trim().isEmpty()) {
-            key = stripDiskMarker(title == null ? "" : title);
+            key = prefixBeforeDiskMarker(title == null ? "" : title);
         }
         return key == null ? "" : key;
     }
@@ -1873,6 +2174,19 @@ public class AdfLibraryActivity extends Activity {
 
     private final class LibraryAdapter extends BaseAdapter {
         @Override
+        public int getViewTypeCount() {
+            return 3;
+        }
+
+        @Override
+        public int getItemViewType(int position) {
+            if (libraryViewMode < VIEW_MODE_LIST || libraryViewMode > VIEW_MODE_CAROUSEL) {
+                return VIEW_MODE_LIST;
+            }
+            return libraryViewMode;
+        }
+
+        @Override
         public int getCount() {
             return filteredEntries.size();
         }
@@ -1889,50 +2203,18 @@ public class AdfLibraryActivity extends Activity {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
+            int type = getItemViewType(position);
             RowHolder h;
             if (convertView == null) {
-                LinearLayout row = new LinearLayout(AdfLibraryActivity.this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setPadding(dp(10), dp(8), dp(10), dp(8));
-                row.setMinimumHeight(dp(110));
-
-                ImageView cover = new ImageView(AdfLibraryActivity.this);
-                cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(72), dp(96));
-                clp.rightMargin = dp(10);
-                row.addView(cover, clp);
-
-                LinearLayout textWrap = new LinearLayout(AdfLibraryActivity.this);
-                textWrap.setOrientation(LinearLayout.VERTICAL);
-                textWrap.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-                TextView title = new TextView(AdfLibraryActivity.this);
-                title.setTextSize(17f);
-                title.setMaxLines(1);
-
-                TextView summary = new TextView(AdfLibraryActivity.this);
-                summary.setTextSize(13f);
-                summary.setMaxLines(3);
-
-                TextView fileName = new TextView(AdfLibraryActivity.this);
-                fileName.setTextSize(11f);
-                fileName.setMaxLines(1);
-
-                textWrap.addView(title);
-                textWrap.addView(summary);
-                textWrap.addView(fileName);
-                row.addView(textWrap);
-
-                h = new RowHolder();
-                h.cover = cover;
-                h.title = title;
-                h.summary = summary;
-                h.fileName = fileName;
-                row.setTag(h);
-                convertView = row;
-            } else {
-                h = (RowHolder) convertView.getTag();
+                if (type == VIEW_MODE_COVERS) {
+                    convertView = createCoversRow();
+                } else if (type == VIEW_MODE_CAROUSEL) {
+                    convertView = createCarouselRow();
+                } else {
+                    convertView = createListRow();
+                }
             }
+            h = (RowHolder) convertView.getTag();
 
             LibraryEntry e = filteredEntries.get(position);
             String title = (e.title == null || e.title.trim().isEmpty()) ? e.fileName : e.title;
@@ -1945,12 +2227,104 @@ public class AdfLibraryActivity extends Activity {
             if (aga && !containsAgaMarker(title)) {
                 title = title + " [AGA]";
             }
-            h.title.setText(title);
-            h.summary.setText((e.summary == null || e.summary.trim().isEmpty()) ? "No IGDB summary yet" : e.summary);
-            h.fileName.setText(e.fileName == null ? "" : e.fileName);
+
+            if (h.title != null) {
+                h.title.setText(title);
+            }
+            if (h.summary != null) {
+                h.summary.setText((e.summary == null || e.summary.trim().isEmpty()) ? "No IGDB summary yet" : e.summary);
+            }
+            if (h.fileName != null) {
+                h.fileName.setText(e.fileName == null ? "" : e.fileName);
+            }
 
             bindCover(h.cover, e.coverUrl);
             return convertView;
+        }
+
+        private View createListRow() {
+            LinearLayout row = new LinearLayout(AdfLibraryActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setPadding(dp(10), dp(8), dp(10), dp(8));
+            row.setMinimumHeight(dp(110));
+
+            ImageView cover = new ImageView(AdfLibraryActivity.this);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(72), dp(96));
+            clp.rightMargin = dp(10);
+            row.addView(cover, clp);
+
+            LinearLayout textWrap = new LinearLayout(AdfLibraryActivity.this);
+            textWrap.setOrientation(LinearLayout.VERTICAL);
+            textWrap.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView title = new TextView(AdfLibraryActivity.this);
+            title.setTextSize(17f);
+            title.setMaxLines(1);
+
+            TextView summary = new TextView(AdfLibraryActivity.this);
+            summary.setTextSize(13f);
+            summary.setMaxLines(3);
+
+            TextView fileName = new TextView(AdfLibraryActivity.this);
+            fileName.setTextSize(11f);
+            fileName.setMaxLines(1);
+
+            textWrap.addView(title);
+            textWrap.addView(summary);
+            textWrap.addView(fileName);
+            row.addView(textWrap);
+
+            RowHolder h = new RowHolder();
+            h.cover = cover;
+            h.title = title;
+            h.summary = summary;
+            h.fileName = fileName;
+            row.setTag(h);
+            return row;
+        }
+
+        private View createCoversRow() {
+            LinearLayout row = new LinearLayout(AdfLibraryActivity.this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_HORIZONTAL);
+            row.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+            ImageView cover = new ImageView(AdfLibraryActivity.this);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(120), dp(160));
+            row.addView(cover, clp);
+
+            RowHolder h = new RowHolder();
+            h.cover = cover;
+            row.setTag(h);
+            return row;
+        }
+
+        private View createCarouselRow() {
+            LinearLayout row = new LinearLayout(AdfLibraryActivity.this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setGravity(Gravity.CENTER_HORIZONTAL);
+            row.setPadding(dp(12), dp(8), dp(12), dp(8));
+
+            ImageView cover = new ImageView(AdfLibraryActivity.this);
+            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(dp(180), dp(240));
+            row.addView(cover, clp);
+
+            TextView title = new TextView(AdfLibraryActivity.this);
+            title.setTextSize(16f);
+            title.setGravity(Gravity.CENTER_HORIZONTAL);
+            title.setMaxLines(1);
+            LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            tlp.topMargin = dp(6);
+            row.addView(title, tlp);
+
+            RowHolder h = new RowHolder();
+            h.cover = cover;
+            h.title = title;
+            row.setTag(h);
+            return row;
         }
     }
 

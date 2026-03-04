@@ -120,6 +120,14 @@
         android:text="Enable Autofire"
         android:textColor="#FFFFFF" />
 
+    <CheckBox
+        android:id="@+id/chkControllerMouseRemap"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Controller Mouse Remap (thumbstick/D-Pad + buttons control mouse)"
+        android:textColor="#FFFFFF" />
+
     <Button
         android:id="@+id/btnJoyMapping"
         android:layout_width="match_parent"

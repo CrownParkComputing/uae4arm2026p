@@ -13,6 +13,8 @@ final class OnlineAdfCatalogService {
 
     private static String sCachedOAuthToken;
     private static long sCachedOAuthTokenExpiryMs;
+    private static String sCachedArcadePlatformsWhere;
+    private static long sCachedArcadePlatformsWhereExpiryMs;
 
     static final class ArchiveItem {
         final String identifier;
@@ -47,12 +49,22 @@ final class OnlineAdfCatalogService {
     }
 
     static IgdbResult searchIgdb(String clientId, String accessToken, String clientSecret, String gameTitle) throws Exception {
-        ArrayList<IgdbResult> candidates = searchIgdbCandidates(clientId, accessToken, clientSecret, gameTitle, 1, true);
+        ArrayList<IgdbResult> candidates = searchIgdbCandidates(clientId, accessToken, clientSecret, gameTitle, 1, true, "platforms = (16)");
+        if (candidates == null || candidates.isEmpty()) return null;
+        return candidates.get(0);
+    }
+
+    static IgdbResult searchIgdbAnyPlatform(String clientId, String accessToken, String clientSecret, String gameTitle) throws Exception {
+        ArrayList<IgdbResult> candidates = searchIgdbCandidates(clientId, accessToken, clientSecret, gameTitle, 1, true, null);
         if (candidates == null || candidates.isEmpty()) return null;
         return candidates.get(0);
     }
 
     static ArrayList<IgdbResult> searchIgdbCandidates(String clientId, String accessToken, String clientSecret, String gameTitle, int limit, boolean normalizeTerm) throws Exception {
+        return searchIgdbCandidates(clientId, accessToken, clientSecret, gameTitle, limit, normalizeTerm, "platforms = (16)");
+    }
+
+    static ArrayList<IgdbResult> searchIgdbCandidates(String clientId, String accessToken, String clientSecret, String gameTitle, int limit, boolean normalizeTerm, String whereClause) throws Exception {
         if (clientId == null || clientId.trim().isEmpty()) return null;
         if (gameTitle == null || gameTitle.trim().isEmpty()) return null;
 
@@ -65,12 +77,37 @@ final class OnlineAdfCatalogService {
         String searchTerm = normalizeTerm ? normalizeIgdbSearchTerm(gameTitle) : gameTitle.trim();
         if (searchTerm.isEmpty()) return null;
         int safeLimit = Math.max(1, Math.min(20, limit));
-        String query = "search \"" + searchTerm.replace("\"", " ").trim() + "\"; where platforms = (16); fields name,summary,cover.image_id; limit " + safeLimit + ";";
+        String where = whereClause == null ? "" : whereClause.trim();
+        String query;
+        if (where.isEmpty()) {
+            query = "search \"" + searchTerm.replace("\"", " ").trim() + "\"; fields name,summary,cover.image_id; limit " + safeLimit + ";";
+        } else {
+            query = "search \"" + searchTerm.replace("\"", " ").trim() + "\"; where " + where + "; fields name,summary,cover.image_id; limit " + safeLimit + ";";
+        }
         String body = httpPost("https://api.igdb.com/v4/games", query,
             "Client-ID: " + clientId.trim(),
             "Authorization: Bearer " + bearer);
 
         JSONArray arr = new JSONArray(body);
+        if (arr.length() == 0) {
+            String like = searchTerm.replace("\"", " ").trim();
+            if (!like.isEmpty()) {
+                String wildcardQuery;
+                if (where.isEmpty()) {
+                    wildcardQuery = "fields name,summary,cover.image_id; where name ~ *\"" + like + "\"*; limit " + safeLimit + ";";
+                } else {
+                    wildcardQuery = "fields name,summary,cover.image_id; where (" + where + ") & (name ~ *\"" + like + "\"*); limit " + safeLimit + ";";
+                }
+                try {
+                    String wildcardBody = httpPost("https://api.igdb.com/v4/games", wildcardQuery,
+                        "Client-ID: " + clientId.trim(),
+                        "Authorization: Bearer " + bearer);
+                    arr = new JSONArray(wildcardBody);
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+
         ArrayList<IgdbResult> out = new ArrayList<>();
         if (arr.length() == 0) return out;
         for (int i = 0; i < arr.length(); i++) {
@@ -94,6 +131,89 @@ final class OnlineAdfCatalogService {
             }
         }
         return out;
+    }
+
+    static String buildArcadePlatformsWhere(String clientId, String accessToken, String clientSecret) {
+        try {
+            String cid = clientId == null ? "" : clientId.trim();
+            if (cid.isEmpty()) return null;
+
+            long now = System.currentTimeMillis();
+            if (sCachedArcadePlatformsWhere != null
+                && !sCachedArcadePlatformsWhere.trim().isEmpty()
+                && now < sCachedArcadePlatformsWhereExpiryMs) {
+                return sCachedArcadePlatformsWhere;
+            }
+
+            String bearer = accessToken == null ? null : accessToken.trim();
+            if (bearer == null || bearer.isEmpty()) {
+                bearer = getAppAccessToken(cid, clientSecret == null ? null : clientSecret.trim());
+            }
+            if (bearer == null || bearer.isEmpty()) return null;
+
+            JSONArray arr = null;
+
+            Integer arcadeTypeId = null;
+            try {
+                String typesBody = "fields id,name; where name ~ \"arcade\"; limit 20;";
+                String typesResponse = httpPost("https://api.igdb.com/v4/platform_types", typesBody,
+                    "Client-ID: " + cid,
+                    "Authorization: Bearer " + bearer);
+                JSONArray types = new JSONArray(typesResponse);
+                for (int i = 0; i < types.length(); i++) {
+                    JSONObject t = types.optJSONObject(i);
+                    if (t == null) continue;
+                    String name = t.optString("name", "").trim().toLowerCase(java.util.Locale.ROOT);
+                    int id = t.optInt("id", 0);
+                    if (id <= 0) continue;
+                    if ("arcade".equals(name)) {
+                        arcadeTypeId = id;
+                        break;
+                    }
+                    if (arcadeTypeId == null) arcadeTypeId = id;
+                }
+            } catch (Throwable ignored) {
+            }
+
+            if (arcadeTypeId != null && arcadeTypeId > 0) {
+                try {
+                    String body = "fields id,name; where platform_type = (" + arcadeTypeId + "); limit 500;";
+                    String response = httpPost("https://api.igdb.com/v4/platforms", body,
+                        "Client-ID: " + cid,
+                        "Authorization: Bearer " + bearer);
+                    arr = new JSONArray(response);
+                } catch (Throwable ignored) {
+                }
+            }
+
+            if (arr == null || arr.length() == 0) {
+                String fallbackBody = "fields id,name; where category = 2; limit 500;";
+                String fallbackResponse = httpPost("https://api.igdb.com/v4/platforms", fallbackBody,
+                    "Client-ID: " + cid,
+                    "Authorization: Bearer " + bearer);
+                arr = new JSONArray(fallbackResponse);
+            }
+
+            if (arr.length() == 0) return null;
+
+            StringBuilder ids = new StringBuilder();
+            for (int i = 0; i < arr.length(); i++) {
+                JSONObject item = arr.optJSONObject(i);
+                if (item == null) continue;
+                int id = item.optInt("id", 0);
+                if (id <= 0) continue;
+                if (ids.length() > 0) ids.append(',');
+                ids.append(id);
+            }
+            if (ids.length() == 0) return null;
+
+            String where = "platforms = (" + ids + ")";
+            sCachedArcadePlatformsWhere = where;
+            sCachedArcadePlatformsWhereExpiryMs = now + (6L * 60L * 60L * 1000L);
+            return where;
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     static String normalizeIgdbSearchTerm(String rawTitle) {

@@ -478,6 +478,25 @@ public class PathsSimpleActivity extends Activity {
         return s + "::/";
     }
 
+    private String normalizeJoinedPathForSlot(Slot slot, String joined, Uri pickedTreeUri) {
+        if (slot == null || joined == null || joined.trim().isEmpty()) return joined;
+        if (!UaeOptionKeys.UAE_PATH_LHA_DIR.equals(slot.prefKey)) return joined;
+
+        String normalized = joined.trim();
+        try {
+            String pickedName = null;
+            DocumentFile picked = DocumentFile.fromTreeUri(this, pickedTreeUri);
+            if (picked != null) pickedName = picked.getName();
+            if (pickedName != null && "lha".equalsIgnoreCase(pickedName.trim())) {
+                return normalized;
+            }
+        } catch (Throwable ignored) {
+        }
+
+        if (!normalized.endsWith("/")) normalized = normalized + "/";
+        return normalized + "lha/";
+    }
+
     private Uri buildInitialUri(String configuredPath) {
         if (configuredPath == null) return null;
         String p = configuredPath.trim();
@@ -496,22 +515,27 @@ public class PathsSimpleActivity extends Activity {
     private void repairMalformedPathsForSelectedParent(String joinedParent) {
         if (joinedParent == null || joinedParent.trim().isEmpty()) return;
 
-        fixPathForParent(UaeOptionKeys.UAE_PATH_CONF_DIR, joinedParent, "conf");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, joinedParent, "kickstarts");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_ROMS_DIR, joinedParent, "roms");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, joinedParent, "disks");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_CDROMS_DIR, joinedParent, "cdroms");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, joinedParent, "harddrives");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_LHA_DIR, joinedParent, "lha");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, joinedParent, "whdboot");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, joinedParent, "savestates");
-        fixPathForParent(UaeOptionKeys.UAE_PATH_SCREENS_DIR, joinedParent, "screenshots");
+        fixPathForParent(UaeOptionKeys.UAE_PATH_CONF_DIR, joinedParent, "conf", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, joinedParent, "kickstarts", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_ROMS_DIR, joinedParent, "roms", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, joinedParent, "disks", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_CDROMS_DIR, joinedParent, "cdroms", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, joinedParent, "harddrives", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_LHA_DIR, joinedParent, "lha", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, joinedParent, "whdboot", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, joinedParent, "savestates", true);
+        fixPathForParent(UaeOptionKeys.UAE_PATH_SCREENS_DIR, joinedParent, "screenshots", true);
     }
 
     private void fixPathForParent(String key, String joinedParent, String rel) {
+        fixPathForParent(key, joinedParent, rel, false);
+    }
+
+    private void fixPathForParent(String key, String joinedParent, String rel, boolean forceAssign) {
         if (key == null || joinedParent == null) return;
         String current = pending.get(key);
-        if (current == null
+        if (forceAssign
+            || current == null
             || current.trim().isEmpty()
             || looksMalformedSafChildTree(current)
             || looksLikeWrongMappedSubfolder(current, joinedParent, rel)) {
@@ -637,7 +661,7 @@ public class PathsSimpleActivity extends Activity {
         }
 
         // For compatibility with existing launcher prompts, keep a "last selected tree".
-        pending.put(slot.prefKey, joined);
+        pending.put(slot.prefKey, normalizeJoinedPathForSlot(slot, joined, uri));
         saveAll();
 
         refreshAll();

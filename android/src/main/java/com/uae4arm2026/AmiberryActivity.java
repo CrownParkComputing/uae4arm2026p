@@ -12,6 +12,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Environment;
 import android.os.ParcelFileDescriptor;
+import android.provider.DocumentsContract;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -43,7 +44,11 @@ import java.io.FileInputStream;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 // SDLActivity is provided by SDL2's Android Java sources.
 // You must include SDL2 in the Android build for this to compile.
@@ -277,24 +282,206 @@ public class AmiberryActivity extends SDLActivity {
 
     /**
      * Derive mapper profile id from currently loaded media.
-     * Format: MEDIA_GAMENAME (e.g. WHD_LOTUS2, DF0_SHADOW_OF_THE_BEAST).
+     * Format: <MEDIA>_<GAME>, e.g. WHD_SUPERFROG or DF0_LOTUS2.
      */
     private String getGameIdentifier() {
         String media = null;
-        String game = filenameWithoutExtension(mWHDLoadFile);
-        if (game != null) {
+        String game = null;
+
+        String whd = filenameWithoutExtension(mWHDLoadFile);
+        if (whd != null && !whd.trim().isEmpty()) {
             media = "WHD";
-        } else {
+            game = whd;
+        }
+
+        if (game == null) {
+            String[] diskPaths = new String[] {
+                mDf0DiskImagePath,
+                mDf1DiskImagePath,
+                mDf2DiskImagePath,
+                mDf3DiskImagePath
+            };
+            String[] mediaNames = new String[] {"DF0", "DF1", "DF2", "DF3"};
+
+            for (int i = 0; i < diskPaths.length; i++) {
+                String diskName = filenameWithoutExtension(diskPaths[i]);
+                if (diskName != null && !diskName.trim().isEmpty()) {
+                    media = mediaNames[i];
+                    game = diskName;
+                    break;
+                }
+            }
+        }
+
+        if (game == null) {
             game = resolveDf0GameName();
-            if (game != null) {
+            if (game != null && !game.trim().isEmpty()) {
                 media = "DF0";
             }
         }
+
         if (media == null || game == null) {
             return null;
         }
 
         return media + "_" + sanitizeIdComponent(game);
+    }
+
+    private static String findAgsHardfilePath(String agsBase, String fileName) {
+        if (agsBase == null || agsBase.trim().isEmpty() || fileName == null || fileName.trim().isEmpty()) return null;
+
+        String hit = findChildUnderAgsBase(agsBase, fileName, false);
+        if (hit != null && !hit.trim().isEmpty()) return hit;
+
+        String[] subDirs = new String[] {"harddrives", "Harddrives", "hdf", "HDF", "AGS_UAE", "ags_uae"};
+        for (String sub : subDirs) {
+            String subPath = findChildUnderAgsBase(agsBase, sub, true);
+            if (subPath == null || subPath.trim().isEmpty()) continue;
+            hit = findChildUnderAgsBase(subPath, fileName, false);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        if (!agsBase.startsWith("content://")) {
+            try {
+                File baseDir = new File(agsBase);
+                File parent = baseDir.getParentFile();
+                if (parent != null && parent.exists() && parent.isDirectory()) {
+                    hit = findChildUnderAgsBase(parent.getAbsolutePath(), fileName, false);
+                    if (hit != null && !hit.trim().isEmpty()) return hit;
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        hit = findNamedChildRecursive(agsBase, fileName, false, 4);
+        if (hit != null && !hit.trim().isEmpty()) return hit;
+
+        return null;
+    }
+
+    private static String findAgsSharedPath(String agsBase) {
+        if (agsBase == null || agsBase.trim().isEmpty()) return null;
+
+        String[] sharedNames = new String[] {"SHARED", "Shared", "shared", "SHARD", "Shard", "shard"};
+        for (String sharedName : sharedNames) {
+            String hit = findChildUnderAgsBase(agsBase, sharedName, true);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        String[] subDirs = new String[] {"AGS_UAE", "ags_uae"};
+        for (String sub : subDirs) {
+            String subPath = findChildUnderAgsBase(agsBase, sub, true);
+            if (subPath == null || subPath.trim().isEmpty()) continue;
+            for (String sharedName : sharedNames) {
+                String hit = findChildUnderAgsBase(subPath, sharedName, true);
+                if (hit != null && !hit.trim().isEmpty()) return hit;
+            }
+        }
+
+        if (!agsBase.startsWith("content://")) {
+            try {
+                File baseDir = new File(agsBase);
+                File parent = baseDir.getParentFile();
+                if (parent != null && parent.exists() && parent.isDirectory()) {
+                    for (String sharedName : sharedNames) {
+                        String hit = findChildUnderAgsBase(parent.getAbsolutePath(), sharedName, true);
+                        if (hit != null && !hit.trim().isEmpty()) return hit;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+
+        for (String sharedName : sharedNames) {
+            String hit = findNamedChildRecursive(agsBase, sharedName, true, 4);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        return null;
+    }
+
+    private static String findNamedChildRecursive(String basePathOrTreeUri, String childName, boolean directory, int maxDepth) {
+        if (basePathOrTreeUri == null || basePathOrTreeUri.trim().isEmpty()) return null;
+        if (childName == null || childName.trim().isEmpty()) return null;
+        if (maxDepth < 0) return null;
+
+        String base = basePathOrTreeUri.trim();
+        String target = childName.trim();
+
+        if (base.startsWith("content://")) {
+            try {
+                Context ctx = SDLActivity.getContext();
+                if (ctx == null) return null;
+                DocumentFile root = DocumentFile.fromTreeUri(ctx, Uri.parse(base));
+                return findNamedSafRecursive(root, target, directory, 0, maxDepth);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        try {
+            File root = new File(base);
+            return findNamedFileRecursive(root, target, directory, 0, maxDepth);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static String findNamedFileRecursive(File dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+
+        for (File kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getAbsolutePath();
+                if (!directory && kid.isFile()) return kid.getAbsolutePath();
+            }
+        }
+
+        for (File kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findNamedFileRecursive(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        return null;
+    }
+
+    private static String findNamedSafRecursive(DocumentFile dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        DocumentFile[] kids;
+        try {
+            kids = dir.listFiles();
+        } catch (Throwable ignored) {
+            return null;
+        }
+        if (kids == null) return null;
+
+        for (DocumentFile kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getUri().toString();
+                if (!directory && kid.isFile()) return kid.getUri().toString();
+            }
+        }
+
+        for (DocumentFile kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findNamedSafRecursive(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        return null;
     }
 
     private String resolveDf0GameName() {
@@ -1364,6 +1551,38 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
+    private static String agsDeviceLabelFromFileName(String fileName, String fallback) {
+        String base = fallback == null ? "" : fallback.trim();
+        try {
+            if (fileName != null && !fileName.trim().isEmpty()) {
+                base = fileName.trim();
+                int dot = base.lastIndexOf('.');
+                if (dot > 0) base = base.substring(0, dot);
+            }
+        } catch (Throwable ignored) {
+        }
+
+        if (base.isEmpty()) {
+            base = (fallback == null || fallback.trim().isEmpty()) ? "DH0" : fallback.trim();
+        }
+
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < base.length(); i++) {
+            char c = base.charAt(i);
+            if (Character.isLetterOrDigit(c) || c == '_') {
+                out.append(c);
+            } else if (c == ' ' || c == '-') {
+                out.append('_');
+            }
+            if (out.length() >= 31) break;
+        }
+
+        if (out.length() == 0) {
+            return (fallback == null || fallback.trim().isEmpty()) ? "DH0" : fallback.trim();
+        }
+        return out.toString();
+    }
+
     private static final class AgsAutoMountResult {
         final boolean mountedAny;
         final boolean mountedHardfile;
@@ -1371,6 +1590,16 @@ public class AmiberryActivity extends SDLActivity {
         AgsAutoMountResult(boolean mountedAny, boolean mountedHardfile) {
             this.mountedAny = mountedAny;
             this.mountedHardfile = mountedHardfile;
+        }
+    }
+
+    private static final class AgsExtraHardfile {
+        final String fileName;
+        final String sourcePath;
+
+        AgsExtraHardfile(String fileName, String sourcePath) {
+            this.fileName = fileName;
+            this.sourcePath = sourcePath;
         }
     }
 
@@ -1383,9 +1612,9 @@ public class AmiberryActivity extends SDLActivity {
         new AgsHardfileSpec("Games.hdf", "DH5", 2),
         new AgsHardfileSpec("Premium.hdf", "DH6", 12),
         new AgsHardfileSpec("Emulators.hdf", "DH7", 10),
-        new AgsHardfileSpec("Emulators2.hdf", "DH15", 15),
-        new AgsHardfileSpec("WHD_Demos.hdf", "DH13", 6),
-        new AgsHardfileSpec("WHD_Games.hdf", "DH14", 14),
+        new AgsHardfileSpec("Emulators2.hdf", "DH8", 15),
+        new AgsHardfileSpec("WHD_Demos.hdf", "DH9", 6),
+        new AgsHardfileSpec("WHD_Games.hdf", "DH10", 14),
     };
 
     private static String deriveAgsBasePathFromPrefs(SharedPreferences p) {
@@ -1427,11 +1656,18 @@ public class AmiberryActivity extends SDLActivity {
         if (basePathOrTreeUri == null || basePathOrTreeUri.trim().isEmpty()) return null;
         String base = basePathOrTreeUri.trim();
 
-        if (base.startsWith("content://")) {
+        if (base.startsWith("content://") || ConfigStorage.isSafJoinedPath(base)) {
             try {
                 Context ctx = SDLActivity.getContext();
                 if (ctx == null) return null;
-                DocumentFile root = DocumentFile.fromTreeUri(ctx, Uri.parse(base));
+                DocumentFile root;
+                if (ConfigStorage.isSafJoinedPath(base)) {
+                    ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(base);
+                    if (sp == null || sp.treeUri == null || sp.treeUri.trim().isEmpty()) return null;
+                    root = resolveSafDirectoryFromTreeAndRel(ctx, sp.treeUri.trim(), sp.relPath);
+                } else {
+                    root = DocumentFile.fromTreeUri(ctx, Uri.parse(base));
+                }
                 if (root == null || !root.isDirectory()) return null;
                 DocumentFile[] kids = root.listFiles();
                 if (kids == null) return null;
@@ -1459,13 +1695,141 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
+    private static DocumentFile resolveSafDirectoryFromTreeAndRel(Context ctx, String treeUriString, String relPath) {
+        if (ctx == null || treeUriString == null || treeUriString.trim().isEmpty()) return null;
+        try {
+            DocumentFile current = DocumentFile.fromTreeUri(ctx, Uri.parse(treeUriString.trim()));
+            if (current == null || !current.isDirectory()) return null;
+
+            String rel = relPath == null ? "" : relPath.trim();
+            while (rel.startsWith("/")) rel = rel.substring(1);
+            while (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+            if (rel.isEmpty()) return current;
+
+            String[] parts = rel.split("/");
+            for (String part : parts) {
+                if (part == null) continue;
+                String name = part.trim();
+                if (name.isEmpty()) continue;
+                DocumentFile next = current.findFile(name);
+                if (next == null || !next.isDirectory()) return null;
+                current = next;
+            }
+            return current;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private static String resolveFilesystemDirectoryPath(String pathOrSafUri) {
+        if (pathOrSafUri == null) return null;
+        String value = pathOrSafUri.trim();
+        if (value.isEmpty()) return null;
+
+        if (ConfigStorage.isSafJoinedPath(value)) {
+            ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(value);
+            if (sp == null || sp.treeUri == null || sp.treeUri.trim().isEmpty()) return null;
+            return resolveFilesystemDirectoryFromTreeUri(sp.treeUri.trim(), sp.relPath);
+        }
+
+        if (!value.startsWith("content://")) {
+            try {
+                File f = new File(value);
+                if (f.exists() && f.isDirectory()) return f.getAbsolutePath();
+            } catch (Throwable ignored) {
+            }
+            return null;
+        }
+
+        return resolveFilesystemDirectoryFromTreeUri(value, null);
+    }
+
+    private static String resolveFilesystemDirectoryFromTreeUri(String treeOrDocumentUriString, String extraRelPath) {
+        if (treeOrDocumentUriString == null || treeOrDocumentUriString.trim().isEmpty()) return null;
+        try {
+            Uri uri = Uri.parse(treeOrDocumentUriString.trim());
+            String docId = null;
+
+            Context ctx = SDLActivity.getContext();
+            if (ctx != null) {
+                try {
+                    if (DocumentsContract.isDocumentUri(ctx, uri)) {
+                        String fromDocument = DocumentsContract.getDocumentId(uri);
+                        if (fromDocument != null && !fromDocument.trim().isEmpty()) {
+                            docId = fromDocument;
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+            }
+
+            if (docId == null || docId.trim().isEmpty()) {
+                try {
+                    docId = DocumentsContract.getTreeDocumentId(uri);
+                } catch (Throwable ignored) {
+                }
+            }
+
+            if (docId == null || docId.trim().isEmpty()) {
+                if (ctx != null) {
+                    try {
+                        if (DocumentsContract.isDocumentUri(ctx, uri)) {
+                            docId = DocumentsContract.getDocumentId(uri);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }
+            }
+
+            if (docId == null || docId.trim().isEmpty()) return null;
+            int colon = docId.indexOf(':');
+            String volumeId = colon >= 0 ? docId.substring(0, colon) : docId;
+            String baseRel = colon >= 0 ? docId.substring(colon + 1) : "";
+
+            String rel = extraRelPath == null ? "" : extraRelPath.trim();
+            while (baseRel.startsWith("/")) baseRel = baseRel.substring(1);
+            while (baseRel.endsWith("/")) baseRel = baseRel.substring(0, baseRel.length() - 1);
+            while (rel.startsWith("/")) rel = rel.substring(1);
+            while (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+
+            String combinedRel;
+            if (baseRel.isEmpty()) combinedRel = rel;
+            else if (rel.isEmpty()) combinedRel = baseRel;
+            else combinedRel = baseRel + "/" + rel;
+
+            File storageRoot;
+            if ("primary".equalsIgnoreCase(volumeId)) {
+                storageRoot = Environment.getExternalStorageDirectory();
+            } else {
+                storageRoot = new File("/storage", volumeId);
+            }
+            if (storageRoot == null) return null;
+
+            File out = combinedRel == null || combinedRel.trim().isEmpty()
+                ? storageRoot
+                : new File(storageRoot, combinedRel);
+
+            return out.exists() && out.isDirectory() ? out.getAbsolutePath() : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     private static AgsAutoMountResult addAgsAutoMountsFromPrefs(List<String> args, SharedPreferences p) {
         if (args == null || p == null) return new AgsAutoMountResult(false, false);
-        if (!p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false)) {
+
+        String agsBase = deriveAgsBasePathFromPrefs(p);
+        boolean agsEnabled = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+        boolean agsLaunchOnce = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false);
+        if (!agsEnabled || !agsLaunchOnce) {
             return new AgsAutoMountResult(false, false);
         }
 
-        String agsBase = deriveAgsBasePathFromPrefs(p);
+        try {
+            p.edit().putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false).apply();
+        } catch (Throwable ignored) {
+        }
+
         if (agsBase == null || agsBase.trim().isEmpty()) {
             logI("AGS auto-mount enabled but no AGS base folder configured");
             return new AgsAutoMountResult(false, false);
@@ -1475,38 +1839,116 @@ public class AmiberryActivity extends SDLActivity {
 
         boolean mountedAny = false;
         boolean mountedHardfile = false;
+        int uaehfIndex = 0;
+        Set<String> mountedFileNames = new HashSet<>();
+        Set<String> usedDevices = new HashSet<>();
+        Set<Integer> usedUnits = new HashSet<>();
 
         for (AgsHardfileSpec spec : AGS_HARDFILE_SPECS) {
-            String sourcePath = findChildUnderAgsBase(agsBase, spec.fileName, false);
+            String sourcePath = findAgsHardfilePath(agsBase, spec.fileName);
             if (sourcePath == null || sourcePath.trim().isEmpty()) {
                 logI("AGS missing " + spec.fileName + " under " + agsBase + " (skipping)");
                 continue;
             }
+
+            String agsLabel = agsDeviceLabelFromFileName(spec.fileName, spec.devName);
 
             ResolvedMediaPath resolved = resolveForCorePathIfNeeded(sourcePath, /*wantWrite*/ true);
             String corePath = (resolved != null && resolved.corePath != null) ? resolved.corePath.trim() : sourcePath;
             boolean ro = (resolved != null && resolved.forcedReadOnly);
 
             String hardfile2 =
-                "hardfile2=" + (ro ? "ro" : "rw") + "," + spec.devName + ":\"" + escapeForUaeQuoted(corePath) +
+                "hardfile2=" + (ro ? "ro" : "rw") + "," + agsLabel + ":\"" + escapeForUaeQuoted(corePath) +
                     "\",0,0,0,512,0,,uae" + spec.controllerUnit;
 
             logI("AGS mount: -s " + hardfile2);
             args.add("-s");
             args.add(hardfile2);
+
+            mountedFileNames.add(spec.fileName.toLowerCase(Locale.ROOT));
+            usedDevices.add(spec.devName.toUpperCase(Locale.ROOT));
+            usedUnits.add(spec.controllerUnit);
+
+            if (corePath.startsWith("content://")) {
+                logI("AGS uaehf skipped for SAF URI path: " + spec.fileName);
+            } else {
+                String uaehf =
+                    "uaehf" + uaehfIndex + "=hdf," + (ro ? "ro" : "rw") + "," + agsLabel + ":" +
+                        escapeForUaeQuoted(corePath) + ",0,0,0,512,0,,uae" + spec.controllerUnit;
+                logI("AGS mount: -s " + uaehf);
+                args.add("-s");
+                args.add(uaehf);
+                uaehfIndex++;
+            }
+
             mountedAny = true;
             mountedHardfile = true;
         }
 
-        String sharedPath = findChildUnderAgsBase(agsBase, "SHARED", true);
+        ArrayList<AgsExtraHardfile> extras = findAdditionalAgsHardfiles(agsBase, mountedFileNames);
+        for (AgsExtraHardfile extra : extras) {
+            if (extra == null || extra.sourcePath == null || extra.sourcePath.trim().isEmpty()) continue;
+
+            String devName = nextAvailableDhDevice(usedDevices);
+            int unit = nextAvailableControllerUnit(usedUnits);
+            if (devName == null || unit < 0) {
+                logI("AGS extra mount skipped for " + extra.fileName + " because no free DH/unit slot was found");
+                continue;
+            }
+
+            ResolvedMediaPath resolved = resolveForCorePathIfNeeded(extra.sourcePath, /*wantWrite*/ true);
+            String corePath = (resolved != null && resolved.corePath != null) ? resolved.corePath.trim() : extra.sourcePath;
+            boolean ro = (resolved != null && resolved.forcedReadOnly);
+
+            String hardfile2 =
+                "hardfile2=" + (ro ? "ro" : "rw") + "," + devName + ":\"" + escapeForUaeQuoted(corePath) +
+                    "\",0,0,0,512,0,,uae" + unit;
+
+            logI("AGS extra mount: -s " + hardfile2 + " [" + extra.fileName + "]");
+            args.add("-s");
+            args.add(hardfile2);
+
+            if (!corePath.startsWith("content://")) {
+                String uaehf =
+                    "uaehf" + uaehfIndex + "=hdf," + (ro ? "ro" : "rw") + "," + devName + ":" +
+                        escapeForUaeQuoted(corePath) + ",0,0,0,512,0,,uae" + unit;
+                logI("AGS extra mount: -s " + uaehf);
+                args.add("-s");
+                args.add(uaehf);
+                uaehfIndex++;
+            }
+
+            usedDevices.add(devName.toUpperCase(Locale.ROOT));
+            usedUnits.add(unit);
+            mountedAny = true;
+            mountedHardfile = true;
+        }
+
+        String sharedPath = findAgsSharedPath(agsBase);
         if (sharedPath != null && !sharedPath.trim().isEmpty()) {
-            if (sharedPath.startsWith("content://")) {
-                logI("AGS SHARED is SAF tree URI; skipping filesystem2 mount because directory mounts require filesystem path");
+            String sharedMountSource = resolveFilesystemDirectoryPath(sharedPath);
+            if (sharedMountSource == null || sharedMountSource.trim().isEmpty()) {
+                logI("AGS shared mount skipped because no filesystem path could be resolved from shared=" + sharedPath + " base=" + agsBase);
             } else {
-                String fs2 = "filesystem2=rw,DH9:SHARED:\"" + escapeForUaeQuoted(sharedPath) + "\",0";
-                logI("AGS mount: -s " + fs2);
+                String sharedDev = nextAvailableDhDevice(usedDevices);
+                if (sharedDev == null || sharedDev.trim().isEmpty()) {
+                    sharedDev = "DH9";
+                }
+
+                String sharedToken = sharedMountSource.trim().replace('\\', '/');
+
+                String fs2 = "filesystem2=rw," + sharedDev + ":SHARED:\"" + escapeForUaeQuoted(sharedToken) + "\",0";
+                logI("AGS mount: -s " + fs2 + " (shared dir)");
                 args.add("-s");
                 args.add(fs2);
+
+                String uaehfDir = "uaehf" + uaehfIndex + "=dir,rw," + sharedDev + ":SHARED:" + sharedToken + ",0";
+                logI("AGS mount: -s " + uaehfDir + " (shared dir)");
+                args.add("-s");
+                args.add(uaehfDir);
+                uaehfIndex++;
+
+                usedDevices.add(sharedDev.toUpperCase(Locale.ROOT));
                 mountedAny = true;
             }
         }
@@ -1516,6 +1958,137 @@ public class AmiberryActivity extends SDLActivity {
         }
 
         return new AgsAutoMountResult(mountedAny, mountedHardfile);
+    }
+
+    private static String nextAvailableDhDevice(Set<String> usedDevices) {
+        if (usedDevices == null) return null;
+        for (int n = 8; n <= 31; n++) {
+            if (n == 11) continue;
+            String candidate = "DH" + n;
+            if (!usedDevices.contains(candidate.toUpperCase(Locale.ROOT))) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private static int nextAvailableControllerUnit(Set<Integer> usedUnits) {
+        if (usedUnits == null) return -1;
+        for (int n = 0; n <= 31; n++) {
+            if (!usedUnits.contains(n)) return n;
+        }
+        return -1;
+    }
+
+    private static ArrayList<AgsExtraHardfile> findAdditionalAgsHardfiles(String agsBase, Set<String> skipNamesLowercase) {
+        ArrayList<AgsExtraHardfile> out = new ArrayList<>();
+        if (agsBase == null || agsBase.trim().isEmpty()) return out;
+
+        Set<String> seenPaths = new HashSet<>();
+
+        if (agsBase.startsWith("content://") || ConfigStorage.isSafJoinedPath(agsBase)) {
+            try {
+                Context ctx = SDLActivity.getContext();
+                if (ctx == null) return out;
+                DocumentFile root = DocumentFile.fromTreeUri(ctx, Uri.parse(agsBase));
+                if (root != null && root.isDirectory()) {
+                    collectSafHardfilesRecursive(root, 0, 4, skipNamesLowercase, seenPaths, out);
+                }
+            } catch (Throwable t) {
+                Log.w(TAG, "AGS SAF hardfile discovery failed: " + t);
+            }
+
+            Collections.sort(out, (a, b) -> {
+                String an = a == null || a.fileName == null ? "" : a.fileName;
+                String bn = b == null || b.fileName == null ? "" : b.fileName;
+                return an.compareToIgnoreCase(bn);
+            });
+            return out;
+        }
+
+        String[] subdirs = new String[] {
+            "",
+            "harddrives",
+            "Harddrives",
+            "hdf",
+            "HDF",
+            "AGS_UAE",
+            "ags_uae",
+            "AGS_UAE/harddrives",
+            "ags_uae/harddrives",
+            "AGS_UAE/HDF",
+            "ags_uae/hdf"
+        };
+
+        for (String rel : subdirs) {
+            File dir = rel == null || rel.isEmpty() ? new File(agsBase) : new File(agsBase, rel);
+            if (!dir.exists() || !dir.isDirectory()) continue;
+            File[] kids = dir.listFiles();
+            if (kids == null) continue;
+            for (File kid : kids) {
+                if (kid == null || !kid.exists() || !kid.isFile()) continue;
+                String name = kid.getName();
+                if (name == null || name.trim().isEmpty()) continue;
+                String lower = name.trim().toLowerCase(Locale.ROOT);
+                if (!lower.endsWith(".hdf")) continue;
+                if (skipNamesLowercase != null && skipNamesLowercase.contains(lower)) continue;
+                String abs = kid.getAbsolutePath();
+                if (seenPaths.contains(abs)) continue;
+                seenPaths.add(abs);
+                out.add(new AgsExtraHardfile(name, abs));
+            }
+        }
+
+        Collections.sort(out, (a, b) -> {
+            String an = a == null || a.fileName == null ? "" : a.fileName;
+            String bn = b == null || b.fileName == null ? "" : b.fileName;
+            return an.compareToIgnoreCase(bn);
+        });
+        return out;
+    }
+
+    private static void collectSafHardfilesRecursive(
+        DocumentFile dir,
+        int depth,
+        int maxDepth,
+        Set<String> skipNamesLowercase,
+        Set<String> seenPaths,
+        List<AgsExtraHardfile> out
+    ) {
+        if (dir == null || !dir.isDirectory()) return;
+        if (depth > maxDepth) return;
+
+        DocumentFile[] kids;
+        try {
+            kids = dir.listFiles();
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (kids == null) return;
+
+        for (DocumentFile kid : kids) {
+            if (kid == null) continue;
+            try {
+                if (kid.isDirectory()) {
+                    collectSafHardfilesRecursive(kid, depth + 1, maxDepth, skipNamesLowercase, seenPaths, out);
+                    continue;
+                }
+                if (!kid.isFile()) continue;
+
+                String name = kid.getName();
+                if (name == null || name.trim().isEmpty()) continue;
+                String lower = name.trim().toLowerCase(Locale.ROOT);
+                if (!lower.endsWith(".hdf")) continue;
+                if (skipNamesLowercase != null && skipNamesLowercase.contains(lower)) continue;
+
+                String uri = kid.getUri() != null ? kid.getUri().toString() : null;
+                if (uri == null || uri.trim().isEmpty()) continue;
+                if (!seenPaths.add(uri)) continue;
+
+                out.add(new AgsExtraHardfile(name, uri));
+            } catch (Throwable ignored) {
+            }
+        }
     }
 
     private static void addSettingArg(List<String> args, String key, String value) {
@@ -1532,7 +2105,7 @@ public class AmiberryActivity extends SDLActivity {
         addSettingArg(args, "cpu_compatible", "true");
     }
 
-    private static String joyEventForAction(int port, String action) {
+    private static String joyEventForAction(int port, String action, boolean mouseMode) {
         if (action == null || action.trim().isEmpty()) return null;
         String keyboardEvent = keyboardEventForAction(action);
         if (keyboardEvent != null) return keyboardEvent;
@@ -1541,6 +2114,18 @@ public class AmiberryActivity extends SDLActivity {
         // Port 0 = joyport0 = Joy1 in Amiberry; Port 1 = joyport1 = Joy2.
         final String jn = (port == 0) ? "Joy1" : "Joy2";
         final String mn = (port == 0) ? "Mouse1" : "Mouse2";
+        if (mouseMode) {
+            switch (action.trim().toUpperCase()) {
+                case "UP":          return mn + " Up";
+                case "DOWN":        return mn + " Down";
+                case "LEFT":        return mn + " Left";
+                case "RIGHT":       return mn + " Right";
+                case "FIRE1":       return mn + " Left Button";
+                case "FIRE2":       return mn + " Right Button";
+                case "FIRE3":       return mn + " Middle Button";
+                default: return null;
+            }
+        }
         switch (action.trim().toUpperCase()) {
             case "UP":          return jn + " Up";
             case "DOWN":        return jn + " Down";
@@ -1623,8 +2208,8 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
-    private static void addJoyMappingOption(List<String> args, int port, String buttonSuffix, String actionValue) {
-        String eventName = joyEventForAction(port, actionValue);
+    private static void addJoyMappingOption(List<String> args, int port, String buttonSuffix, String actionValue, boolean mouseMode) {
+        String eventName = joyEventForAction(port, actionValue, mouseMode);
         if (eventName == null) return;
         String opt = "joyport" + port + "_amiberry_custom_none_" + buttonSuffix + "=" + eventName;
         Log.i(TAG, "Joy map arg: -s " + opt);
@@ -1654,9 +2239,19 @@ public class AmiberryActivity extends SDLActivity {
             Log.i(TAG, "Joy mapping: using per-game overrides for \"" + gameId + "\"");
         }
 
+        boolean controllerMouseRemap = false;
+        try {
+            controllerMouseRemap = globalPrefs.getBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, false);
+        } catch (Throwable ignored) {
+        }
+
         java.util.ArrayList<Integer> targetPorts = new java.util.ArrayList<>();
+        java.util.HashSet<Integer> mousePorts = new java.util.HashSet<>();
         try {
             String p0 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT0_MODE, "mouse");
+            if (p0 != null && p0.trim().equalsIgnoreCase("mouse")) {
+                mousePorts.add(0);
+            }
             if (p0 != null && p0.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
                 targetPorts.add(0);
             }
@@ -1664,28 +2259,41 @@ public class AmiberryActivity extends SDLActivity {
         }
         try {
             String p1 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT1_MODE, "joy0");
+            if (p1 != null && p1.trim().equalsIgnoreCase("mouse")) {
+                mousePorts.add(1);
+            }
             if (p1 != null && p1.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
                 targetPorts.add(1);
             }
         } catch (Throwable ignored) {
         }
+
+        if (controllerMouseRemap) {
+            for (Integer mp : mousePorts) {
+                if (mp != null && !targetPorts.contains(mp)) {
+                    targetPorts.add(mp);
+                }
+            }
+        }
+
         if (targetPorts.isEmpty()) {
             targetPorts.add(1);
         }
 
         for (int port : targetPorts) {
-            addJoyMappingOption(args, port, "a", mapA);
-            addJoyMappingOption(args, port, "b", mapB);
-            addJoyMappingOption(args, port, "x", mapX);
-            addJoyMappingOption(args, port, "y", mapY);
-            addJoyMappingOption(args, port, "leftshoulder", mapL1);
-            addJoyMappingOption(args, port, "rightshoulder", mapR1);
-            addJoyMappingOption(args, port, "back", mapBack);
-            addJoyMappingOption(args, port, "start", mapStart);
-            addJoyMappingOption(args, port, "dpup", mapDpadUp);
-            addJoyMappingOption(args, port, "dpdown", mapDpadDown);
-            addJoyMappingOption(args, port, "dpleft", mapDpadLeft);
-            addJoyMappingOption(args, port, "dpright", mapDpadRight);
+            boolean mouseMode = controllerMouseRemap && mousePorts.contains(port);
+            addJoyMappingOption(args, port, "a", mapA, mouseMode);
+            addJoyMappingOption(args, port, "b", mapB, mouseMode);
+            addJoyMappingOption(args, port, "x", mapX, mouseMode);
+            addJoyMappingOption(args, port, "y", mapY, mouseMode);
+            addJoyMappingOption(args, port, "leftshoulder", mapL1, mouseMode);
+            addJoyMappingOption(args, port, "rightshoulder", mapR1, mouseMode);
+            addJoyMappingOption(args, port, "back", mapBack, mouseMode);
+            addJoyMappingOption(args, port, "start", mapStart, mouseMode);
+            addJoyMappingOption(args, port, "dpup", mapDpadUp, mouseMode);
+            addJoyMappingOption(args, port, "dpdown", mapDpadDown, mouseMode);
+            addJoyMappingOption(args, port, "dpleft", mapDpadLeft, mouseMode);
+            addJoyMappingOption(args, port, "dpright", mapDpadRight, mouseMode);
         }
     }
 
@@ -4271,46 +4879,53 @@ public class AmiberryActivity extends SDLActivity {
         String gameId = getGameIdentifier();
         addAndroidJoyMappingsFromPrefs(args, p, perGamePrefs, gameId);
 
+        boolean agsAutoMountEnabled = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false)
+            && p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false);
+
         // Drives / CD overrides
         // CD image (cdimage0) is supported by Amiberry (see amiberry_whdbooter.cpp) in the form:
         //   cdimage0=<path>,image
-        String cd0 = null;
-        if (mCdImagePath != null && !mCdImagePath.trim().isEmpty()) {
-            cd0 = mCdImagePath.trim();
-        } else if (p.contains(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)) {
-            cd0 = p.getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
-            if (cd0 != null) cd0 = cd0.trim();
-        }
-        if (cd0 != null && !cd0.isEmpty()) {
-            if (cd0.startsWith("content://")) {
-                cd0 = materializeCdImageUriIfNeeded(cd0);
+        if (!agsAutoMountEnabled) {
+            String cd0 = null;
+            if (mCdImagePath != null && !mCdImagePath.trim().isEmpty()) {
+                cd0 = mCdImagePath.trim();
+            } else if (p.contains(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)) {
+                cd0 = p.getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
+                if (cd0 != null) cd0 = cd0.trim();
             }
-            if (cd0 == null || cd0.trim().isEmpty()) {
-                logI("Skipping cdimage0 because selected CD path is unavailable for core mount");
-            } else {
-            ResolvedMediaPath resolvedCd0 = resolveForCorePathIfNeeded(cd0, /*wantWrite*/ false);
-            String cdCorePath = (resolvedCd0 != null && resolvedCd0.corePath != null)
-                ? resolvedCd0.corePath.trim()
-                : cd0;
-
-            // Match upstream CD parsing behavior: mount the selected image directly.
-            // For local CUE files, keep FILE refs normalized to basename/case.
-            try {
-                if (!cdCorePath.startsWith("content://")) {
-                    File cueFile = new File(cdCorePath);
-                    if (cueFile.exists() && cueFile.isFile()
-                        && "cue".equals(BootstrapMediaUtils.lowerExt(cueFile.getName()))) {
-                        BootstrapMediaUtils.fixCueTrackFilenameCase(cueFile);
-                    }
+            if (cd0 != null && !cd0.isEmpty()) {
+                if (cd0.startsWith("content://")) {
+                    cd0 = materializeCdImageUriIfNeeded(cd0);
                 }
-            } catch (Throwable t) {
-                Log.w(TAG, "CUE normalization failed", t);
-            }
+                if (cd0 == null || cd0.trim().isEmpty()) {
+                    logI("Skipping cdimage0 because selected CD path is unavailable for core mount");
+                } else {
+                    ResolvedMediaPath resolvedCd0 = resolveForCorePathIfNeeded(cd0, /*wantWrite*/ false);
+                    String cdCorePath = (resolvedCd0 != null && resolvedCd0.corePath != null)
+                        ? resolvedCd0.corePath.trim()
+                        : cd0;
 
-            args.add("-s");
-            args.add("cdimage0=\"" + escapeForUaeQuoted(cdCorePath) + "\",image");
-            logI("Emitting cdimage0=" + cdCorePath);
+                    // Match upstream CD parsing behavior: mount the selected image directly.
+                    // For local CUE files, keep FILE refs normalized to basename/case.
+                    try {
+                        if (!cdCorePath.startsWith("content://")) {
+                            File cueFile = new File(cdCorePath);
+                            if (cueFile.exists() && cueFile.isFile()
+                                && "cue".equals(BootstrapMediaUtils.lowerExt(cueFile.getName()))) {
+                                BootstrapMediaUtils.fixCueTrackFilenameCase(cueFile);
+                            }
+                        }
+                    } catch (Throwable t) {
+                        Log.w(TAG, "CUE normalization failed", t);
+                    }
+
+                    args.add("-s");
+                    args.add("cdimage0=\"" + escapeForUaeQuoted(cdCorePath) + "\",image");
+                    logI("Emitting cdimage0=" + cdCorePath);
+                }
             }
+        } else {
+            logI("AGS auto-mount enabled; cdimage0 skipped");
         }
 
         boolean isCd32Quickstart = false;
@@ -4348,7 +4963,7 @@ public class AmiberryActivity extends SDLActivity {
             AgsAutoMountResult agsResult = addAgsAutoMountsFromPrefs(args, p);
             needsUaeBootRom |= agsResult.mountedHardfile;
 
-            if (!agsResult.mountedAny) {
+            if (!agsAutoMountEnabled && !agsResult.mountedAny) {
                 // Directory mounts (filesystem2)
                 addFilesystem2FromPrefs(args, p,
                     UaeOptionKeys.UAE_DRIVE_DIR0_ENABLED,
@@ -4483,6 +5098,8 @@ public class AmiberryActivity extends SDLActivity {
                     6,
                     mKickstartRomFile,
                     romPath);
+            } else if (agsAutoMountEnabled && !agsResult.mountedAny) {
+                logI("AGS base is configured but no AGS mounts were emitted; skipping generic dir/hdf fallback to preserve AGS-only ordering");
             }
         }
 

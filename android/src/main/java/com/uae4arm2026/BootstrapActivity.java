@@ -42,6 +42,7 @@ import java.util.Objects;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public class BootstrapActivity extends Activity {
     @Override
@@ -71,6 +72,8 @@ public class BootstrapActivity extends Activity {
             } catch (Throwable ignored) {
             }
         }
+
+        maybeLaunchAgsFromSetupIntent(intent);
     }
 
     private void quitAppFully() {
@@ -147,6 +150,7 @@ public class BootstrapActivity extends Activity {
     public static final String EXTRA_FROM_EMULATOR_MENU = "com.uae4arm2026.extra.FROM_EMULATOR_MENU";
     public static final String EXTRA_OPEN_MEDIA_SWAPPER = "com.uae4arm2026.extra.OPEN_MEDIA_SWAPPER";
     public static final String EXTRA_OPEN_MEDIA_SECTION = "com.uae4arm2026.extra.OPEN_MEDIA_SECTION";
+    public static final String EXTRA_LAUNCH_AGS_FROM_SETUP = "com.uae4arm2026.extra.LAUNCH_AGS_FROM_SETUP";
     public static final String MEDIA_SECTION_DF = "df";
     public static final String MEDIA_SECTION_HD = "hd";
     public static final String MEDIA_SECTION_CD = "cd";
@@ -218,17 +222,14 @@ public class BootstrapActivity extends Activity {
     private View mExtRomSection;
 
     private View mDf1Controls;
-    private View mBtnAddDf1;
     private boolean mDf1Added;
 
     private boolean mDf2Added;
     private boolean mDf3Added;
 
-    private View mBtnAddDh0;
     private boolean mDh0Added;
 
     private View mCd0Section;
-    private View mBtnAddCd0;
     private View mBtnCdCorner;
     private boolean mCd0Added;
     private boolean mDh1Added;
@@ -771,6 +772,7 @@ public class BootstrapActivity extends Activity {
             }
 
             final boolean cdOnly = isCdOnlyModel();
+            final boolean agsAutoMountEnabled = isAgsAutoMountEnabled();
             final String normalizedSection = normalizeMediaSection(openSection);
             final String section = normalizedSection.isEmpty() ? MEDIA_SECTION_DF : normalizedSection;
             mLastMediaSection = section;
@@ -848,6 +850,9 @@ public class BootstrapActivity extends Activity {
                     bHardDrive.setVisibility(View.GONE);
                 }
                 if (!showCd) {
+                    bCd.setVisibility(View.GONE);
+                }
+                if (agsAutoMountEnabled) {
                     bCd.setVisibility(View.GONE);
                 }
 
@@ -1052,7 +1057,7 @@ public class BootstrapActivity extends Activity {
                 );
             }
 
-            if (showCd && (cdOnly || mCd0Added)) {
+            if (!agsAutoMountEnabled && showCd && (cdOnly || mCd0Added)) {
                 String cd0 = getUaePrefString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH);
                 addMediaSwapperRow(root, "CD0: " + shortLabelForPath(cd0), this::pickCdImage0);
             }
@@ -1873,10 +1878,6 @@ public class BootstrapActivity extends Activity {
 
     private void disableDirectMediaEditingControls() {
         int[] ids = new int[] {
-            R.id.btnAddDf1,
-            R.id.btnAddDh0,
-            R.id.btnAddCd0,
-
             R.id.btnPickDf0,
             R.id.btnClearDf0,
             R.id.btnPickDf1,
@@ -3495,8 +3496,20 @@ public class BootstrapActivity extends Activity {
     private void startEmulator() {
         applyKickstartAutoForCurrentModel(false);
 
+        if (shouldDisableAgsLaunchForExplicitBoot()) {
+            try {
+                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false)
+                    .apply();
+                LogUtil.i(TAG, "Cleared AGS one-shot launch due to explicit media boot selection");
+            } catch (Throwable ignored) {
+            }
+        }
+
         String qsModel = getSelectedQsModelId();
         boolean isCdOnly = isCdOnlyModel();
+        boolean agsAutoMountEnabled = isAgsAutoMountEnabled();
 
         // Trace what we think we're going to boot with (helps diagnose "HDF selected but not booting").
         try {
@@ -3588,7 +3601,7 @@ public class BootstrapActivity extends Activity {
 
         // DH0 validation - only require HDF if user actually wants to boot from hard drive
         // Booting from floppy (DF0) is independent of hard drive configuration
-        if (!isCdOnly && mDh0Added) {
+        if (!isCdOnly && !agsAutoMountEnabled && mDh0Added) {
             String mode = getDh0Mode();
             if (DH0_MODE_DIR.equals(mode)) {
                 if (mSelectedDh0Dir != null && (!mSelectedDh0Dir.exists() || !mSelectedDh0Dir.isDirectory())) {
@@ -3695,6 +3708,16 @@ public class BootstrapActivity extends Activity {
         launchEmulator(qsModel, isCdOnly);
     }
 
+    private boolean shouldDisableAgsLaunchForExplicitBoot() {
+        try {
+            if (hasDf0()) return true;
+            if (hasDh0()) return true;
+            return hasCd0();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
     private void launchEmulator(String qsModel, boolean isCdOnly) {
         launchEmulator(qsModel, isCdOnly, /*includeFloppyExtras*/ true);
     }
@@ -3706,6 +3729,9 @@ public class BootstrapActivity extends Activity {
     }
 
     private Intent buildEmulatorIntent(String qsModel, boolean isCdOnly, boolean includeFloppyExtras) {
+        final SharedPreferences uaePrefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+        final boolean agsAutoMountEnabled = isAgsAutoMountEnabled();
+
         // Ensure Kickstart Map (per-model mapping) is applied for the current selection.
         // This keeps the mapped ROM authoritative at boot time.
         try {
@@ -3732,8 +3758,15 @@ public class BootstrapActivity extends Activity {
                 cdPathNow = mSelectedCd0.getAbsolutePath();
             }
 
-            if (cdPathNow != null && isReadableMediaPath(cdPathNow)) {
-                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+            if (agsAutoMountEnabled) {
+                uaePrefs
+                    .edit()
+                    .remove(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH)
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, false)
+                    .commit();
+                LogUtil.i(TAG, "Launch commit skipped cdimage0 (AGS auto-mount enabled)");
+            } else if (cdPathNow != null && isReadableMediaPath(cdPathNow)) {
+                uaePrefs
                     .edit()
                     .putString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, cdPathNow)
                     .putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, true)
@@ -3852,25 +3885,28 @@ public class BootstrapActivity extends Activity {
         }
 
         String cdLaunchPath = null;
-        if (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty()) {
-            cdLaunchPath = mSelectedCd0Path.trim();
-        } else if (mSelectedCd0 != null && mSelectedCd0.exists() && mSelectedCd0.isFile() && mSelectedCd0.length() > 0) {
-            cdLaunchPath = mSelectedCd0.getAbsolutePath();
-        } else {
-            try {
-                String prefCd = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                    .getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
-                if (prefCd != null && !prefCd.trim().isEmpty()) {
-                    cdLaunchPath = prefCd.trim();
+        if (!agsAutoMountEnabled) {
+            if (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty()) {
+                cdLaunchPath = mSelectedCd0Path.trim();
+            } else if (mSelectedCd0 != null && mSelectedCd0.exists() && mSelectedCd0.isFile() && mSelectedCd0.length() > 0) {
+                cdLaunchPath = mSelectedCd0.getAbsolutePath();
+            } else {
+                try {
+                    String prefCd = uaePrefs.getString(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH, null);
+                    if (prefCd != null && !prefCd.trim().isEmpty()) {
+                        cdLaunchPath = prefCd.trim();
+                    }
+                } catch (Throwable ignored) {
                 }
-            } catch (Throwable ignored) {
             }
-        }
-        if (cdLaunchPath != null && isReadableMediaPath(cdLaunchPath)) {
-            i.putExtra(AmiberryActivity.EXTRA_CD_IMAGE0_FILE, cdLaunchPath);
-            LogUtil.i(TAG, "Passing forced CD image via intent: " + cdLaunchPath);
-        } else if (isCdOnly) {
-            LogUtil.i(TAG, "No readable CD path available for forced intent extra");
+            if (cdLaunchPath != null && isReadableMediaPath(cdLaunchPath)) {
+                i.putExtra(AmiberryActivity.EXTRA_CD_IMAGE0_FILE, cdLaunchPath);
+                LogUtil.i(TAG, "Passing forced CD image via intent: " + cdLaunchPath);
+            } else if (isCdOnly) {
+                LogUtil.i(TAG, "No readable CD path available for forced intent extra");
+            }
+        } else {
+            LogUtil.i(TAG, "Skipping forced CD intent extra (AGS auto-mount enabled)");
         }
 
         // Native menu replaces Amiberry's GUI.
@@ -4235,7 +4271,7 @@ public class BootstrapActivity extends Activity {
 
         // CPU/FPU defaults from Quickstart selection.
         // Note: these are written so the option pages reflect the chosen model/config.
-        String cpuModel = inferCpuModel(modelId, cfg);
+        String cpuModel = BootstrapQuickstartDefaults.inferCpuModel(modelId, cfg);
         if (cpuModel != null) {
             e.putString(UaeOptionKeys.UAE_CPU_MODEL, cpuModel);
         } else {
@@ -4247,15 +4283,15 @@ public class BootstrapActivity extends Activity {
         if (easySetupActive) {
             rtg = mEasyRtg.isChecked();
         }
-        boolean cpu24bit = rtg ? false : is24BitAddressing(cpuModel);
+        boolean cpu24bit = rtg ? false : BootstrapQuickstartDefaults.is24BitAddressing(cpuModel);
         if ("CD32".equalsIgnoreCase(modelId)) {
             // Keep CD32 aligned with upstream quickstart defaults (68020 + 24-bit address space).
             cpu24bit = true;
         }
         e.putBoolean(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING, cpu24bit);
-        e.putBoolean(UaeOptionKeys.UAE_CPU_COMPATIBLE, inferCpuCompatibleDefault(modelId));
+        e.putBoolean(UaeOptionKeys.UAE_CPU_COMPATIBLE, BootstrapQuickstartDefaults.inferCpuCompatibleDefault(modelId));
         e.putBoolean(UaeOptionKeys.UAE_CPU_DATA_CACHE, false);
-        String cpuSpeed = inferCpuSpeedDefault(modelId);
+        String cpuSpeed = BootstrapQuickstartDefaults.inferCpuSpeedDefault(modelId);
         if (cpuSpeed != null) {
             e.putString(UaeOptionKeys.UAE_CPU_SPEED, cpuSpeed);
         } else {
@@ -4263,7 +4299,7 @@ public class BootstrapActivity extends Activity {
         }
         e.remove(UaeOptionKeys.UAE_CPU_MULTIPLIER);
 
-        String fpuModel = inferFpuModel(cpuModel, cfg);
+        String fpuModel = BootstrapQuickstartDefaults.inferFpuModel(cpuModel, cfg);
         if (fpuModel != null) {
             e.putString(UaeOptionKeys.UAE_FPU_MODEL, fpuModel);
         } else {
@@ -4286,7 +4322,7 @@ public class BootstrapActivity extends Activity {
         // Keep cycle-exact in sync with Amiberry's built-in Quickstart defaults for the chosen model/config.
         // (RTG modes intentionally force non-cycle-exact for performance.)
         if (!rtg) {
-            String cycleExact = inferCycleExactDefault(modelId, cpuModel, cfg);
+            String cycleExact = BootstrapQuickstartDefaults.inferCycleExactDefault(modelId, cpuModel, cfg);
             if (cycleExact != null) {
                 e.putString(UaeOptionKeys.UAE_CYCLE_EXACT, cycleExact);
             } else {
@@ -4333,7 +4369,7 @@ public class BootstrapActivity extends Activity {
         e.putBoolean(UaeOptionKeys.UAE_COMP_CATCHFAULT, false);
 
         // RAM defaults from Quickstart selection.
-        applyQuickstartMemoryDefaults(e, modelId, cfg);
+        BootstrapQuickstartDefaults.applyQuickstartMemoryDefaults(e, modelId, cfg);
 
         if (easySetupActive && mEasyChip != null && mEasyFast != null) {
             int chipIdx = Math.max(0, Math.min(EASY_CHIP_VALUES.length - 1, mEasyChip.getSelectedItemPosition()));
@@ -4371,171 +4407,6 @@ public class BootstrapActivity extends Activity {
         }
 
         e.apply();
-    }
-
-    private static boolean is24BitAddressing(String cpuModel) {
-        if (cpuModel == null) return false;
-        return "68000".equals(cpuModel) || "68010".equals(cpuModel);
-    }
-
-    private static String inferCpuModel(String modelId, String cfgLabel) {
-        if (cfgLabel != null) {
-            String lc = cfgLabel.toLowerCase(Locale.ROOT);
-            if (lc.contains("68060")) return "68060";
-            if (lc.contains("68040")) return "68040";
-            if (lc.contains("68030")) return "68030";
-            if (lc.contains("68020")) return "68020";
-            if (lc.contains("68010")) return "68010";
-            if (lc.contains("68000")) return "68000";
-        }
-
-        String upperModel = modelId == null ? "" : modelId.toUpperCase(Locale.ROOT);
-        switch (upperModel) {
-            case "A1200":
-            case "CD32":
-                return "68020";
-            case "A3000":
-                return "68030";
-            case "A4000":
-                // Common baseline; config label can override to 68040/68060.
-                return "68030";
-            default:
-                return "68000";
-        }
-    }
-
-    private static String inferCycleExactDefault(String modelId, String cpuModel, String cfgLabel) {
-        if (modelId == null) return null;
-
-        // Mirror Amiberry's built-in Quickstart presets (built_in_prefs(..., compa=0)).
-        // Not all built-in presets enable cycle-exact (e.g. faster big-box presets).
-        String m = modelId.trim().toUpperCase(Locale.ROOT);
-
-        // Big-box defaults in Amiberry are generally tuned for performance.
-        if ("A3000".equals(m) || "A4000".equals(m)) {
-            return "false";
-        }
-
-        // A1200/CD32 defaults are cycle-exact for baseline 68020/68030 presets.
-        // If the chosen config implies a 68040/68060 class CPU, avoid cycle-exact by default.
-        if ("A1200".equals(m) || "CD32".equals(m)) {
-            if ("68040".equals(cpuModel) || "68060".equals(cpuModel)) {
-                return "false";
-            }
-            return "true";
-        }
-
-        // 68000-based home models default to cycle-exact in Quickstart.
-        return "true";
-    }
-
-    private static boolean inferCpuCompatibleDefault(String modelId) {
-        if (modelId == null) return true;
-        String m = modelId.trim().toUpperCase(Locale.ROOT);
-
-        // In upstream built-in presets, big-box defaults run with cpu_compatible disabled.
-        return !("A3000".equals(m) || "A4000".equals(m));
-    }
-
-    private static String inferCpuSpeedDefault(String modelId) {
-        if (modelId == null) return null;
-        String m = modelId.trim().toUpperCase(Locale.ROOT);
-
-        // Upstream built-in presets set m68k_speed=-1 (max) for A3000/A4000,
-        // and m68k_speed=0 (real) for A500/A500+/A600/A1200/CD32 quickstarts.
-        if ("A3000".equals(m) || "A4000".equals(m)) {
-            return "max";
-        }
-        return "real";
-    }
-
-    private static String inferFpuModel(String cpuModel, String cfgLabel) {
-        if (cfgLabel != null) {
-            String lc = cfgLabel.toLowerCase(Locale.ROOT);
-            if (lc.contains("fpu")) {
-                if (lc.contains("68060")) return "68060";
-                if (lc.contains("68040")) return "68040";
-                if (lc.contains("68882")) return "68882";
-                if (lc.contains("68881")) return "68881";
-            }
-        }
-
-        if (cpuModel == null) return null;
-        if ("68040".equals(cpuModel)) return "68040";
-        if ("68060".equals(cpuModel)) return "68060";
-        // Most Quickstart configs do not enable an FPU by default.
-        return "0";
-    }
-
-    private static void applyQuickstartMemoryDefaults(SharedPreferences.Editor e, String modelId, String cfgLabel) {
-        // Defaults depend mostly on model; config label can override.
-        String upperModel = modelId == null ? "" : modelId.toUpperCase(Locale.ROOT);
-
-        int chip = 2; // 1MB default
-        int bogo = 0;
-        int fastBytes = 0;
-
-        switch (upperModel) {
-            case "A1200":
-            case "A4000":
-            case "CD32":
-                chip = 4; // 2MB chip
-                bogo = 0;
-                fastBytes = 0;
-                break;
-            case "A3000":
-                chip = 4; // 2MB chip
-                bogo = 0;
-                fastBytes = 8 * 1024 * 1024;
-                break;
-            case "A500":
-            case "A500P":
-            case "A600":
-            case "A1000":
-            case "A2000":
-            default:
-                chip = 1; // 512KB chip
-                bogo = 0;
-                fastBytes = 0;
-                break;
-        }
-
-        // Refine using the config label text.
-        if (cfgLabel != null) {
-            String lc = cfgLabel.toLowerCase(Locale.ROOT);
-
-            if (lc.contains("256 kb chip")) chip = 0;
-            else if (lc.contains("512 kb chip")) chip = 1;
-            else if (lc.contains("1.5 mb chip") || lc.contains("1,5 mb chip")) chip = 3;
-            else if (lc.contains("2 mb chip")) chip = 4;
-            else if (lc.contains("4 mb chip")) chip = 8;
-            else if (lc.contains("8 mb chip")) chip = 16;
-            else if (lc.contains("1 mb chip")) chip = 2;
-
-            if (lc.contains("512 kb slow")) bogo = 2;
-            else if (lc.contains("1.5 mb slow") || lc.contains("1,5 mb slow")) bogo = 6;
-            else if (lc.contains("1.8 mb") && lc.contains("slow")) bogo = 7;
-            else if (lc.contains("1 mb slow")) bogo = 4;
-
-            if (lc.contains("64 kb fast")) fastBytes = 64 * 1024;
-            else if (lc.contains("128 kb fast")) fastBytes = 128 * 1024;
-            else if (lc.contains("256 kb fast")) fastBytes = 256 * 1024;
-            else if (lc.contains("512 kb fast")) fastBytes = 512 * 1024;
-            else if (lc.contains("1 gb fast")) fastBytes = 1024 * 1024 * 1024;
-            else if (lc.contains("1 mb fast")) fastBytes = 1 * 1024 * 1024;
-            else if (lc.contains("2 mb fast")) fastBytes = 2 * 1024 * 1024;
-            else if (lc.contains("4 mb fast")) fastBytes = 4 * 1024 * 1024;
-            else if (lc.contains("8 mb fast")) fastBytes = 8 * 1024 * 1024;
-        }
-
-        e.putInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, chip);
-        e.putInt(UaeOptionKeys.UAE_MEM_BOGOMEM_SIZE, bogo);
-        e.putInt(UaeOptionKeys.UAE_MEM_FASTMEM_BYTES, fastBytes);
-        e.putInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 0);
-        e.putInt(UaeOptionKeys.UAE_MEM_MEGACHIPMEM_SIZE_MB, 0);
-        e.putInt(UaeOptionKeys.UAE_MEM_A3000MEM_SIZE_MB, 0);
-        e.putInt(UaeOptionKeys.UAE_MEM_MBRESMEM_SIZE_MB, 0);
-        e.putString(UaeOptionKeys.UAE_MEM_Z3MAPPING, "auto");
     }
 
     private boolean importToFile(Uri uri, File dest) {
@@ -4579,134 +4450,30 @@ public class BootstrapActivity extends Activity {
         mDh6SourceName = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREF_DH6_SRC, null);
     }
 
-    private static boolean isLikelyRomFile(File f) {
-        return BootstrapMediaUtils.isLikelyRomFile(f);
-    }
-
-    private static boolean isLikelyRomName(String name) {
-        return BootstrapMediaUtils.isLikelyRomName(name);
-    }
-
     private static String sanitizeFilename(String name) {
         return BootstrapMediaUtils.sanitizeFilename(name);
     }
 
-    private static List<File> listRomCandidates(File romsDir) {
-        ArrayList<File> out = new ArrayList<>();
-        if (romsDir == null || !romsDir.exists() || !romsDir.isDirectory()) return out;
-        File[] files = romsDir.listFiles();
-        if (files == null) return out;
-        for (File f : files) {
-            if (isLikelyRomFile(f)) out.add(f);
-        }
-        return out;
-    }
-
     private List<RomSource> listRomSourcesFromKickstartsDirPref() {
+        maybeMigrateKickstartsPathPref();
         try {
-            maybeMigrateKickstartsPathPref();
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
             String kickstarts = p.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
-            if (kickstarts == null || kickstarts.trim().isEmpty()) return new ArrayList<>();
-            String v = kickstarts.trim();
-            ArrayList<RomSource> out = new ArrayList<>();
-
-            // SAF joined path: content://...::/relative/path
-            if (ConfigStorage.isSafJoinedPath(v)) {
-                ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(v);
-                if (sp == null || sp.treeUri == null) return out;
-
-                android.net.Uri treeUri = android.net.Uri.parse(sp.treeUri);
-                androidx.documentfile.provider.DocumentFile cur = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, treeUri);
-                if (cur == null || !cur.exists() || !cur.isDirectory()) return out;
-
-                String rel = sp.relPath;
-                if (rel != null) {
-                    String rp = rel.trim();
-                    if (rp.startsWith("/")) rp = rp.substring(1);
-                    if (!rp.isEmpty() && !"/".equals(rp)) {
-                        String[] parts = rp.split("/");
-                        for (String part : parts) {
-                            if (part == null) continue;
-                            String seg = part.trim();
-                            if (seg.isEmpty()) continue;
-                            androidx.documentfile.provider.DocumentFile next = cur.findFile(seg);
-                            if (next == null) return out;
-                            cur = next;
-                        }
-                    }
-                }
-
-                if (!cur.exists() || !cur.isDirectory()) return out;
-                androidx.documentfile.provider.DocumentFile[] kids = cur.listFiles();
-                if (kids == null) return out;
-                for (androidx.documentfile.provider.DocumentFile df : kids) {
-                    if (df == null || !df.exists() || !df.isFile()) continue;
-                    String name = df.getName();
-                    if (!isLikelyRomName(name)) continue;
-                    out.add(new RomSource(name, null, df.getUri(), false));
-                }
-                return out;
-            }
-
-            // Plain tree URI.
-            if (isContentUriString(v)) {
-                try {
-                    android.net.Uri treeUri = android.net.Uri.parse(v);
-                    androidx.documentfile.provider.DocumentFile dirDf = androidx.documentfile.provider.DocumentFile.fromTreeUri(this, treeUri);
-                    if (dirDf != null && dirDf.exists() && dirDf.isDirectory()) {
-                        androidx.documentfile.provider.DocumentFile[] kids = dirDf.listFiles();
-                        if (kids != null) {
-                            for (androidx.documentfile.provider.DocumentFile df : kids) {
-                                if (df == null || !df.exists() || !df.isFile()) continue;
-                                String name = df.getName();
-                                if (!isLikelyRomName(name)) continue;
-                                out.add(new RomSource(name, null, df.getUri(), false));
-                            }
-                        }
-                    }
-                } catch (Throwable ignored) {
-                }
-                return out;
-            }
-
-            // Regular filesystem path.
-            File dir = new File(v);
-            if (!dir.exists() || !dir.isDirectory() || !dir.canRead()) return out;
-            File[] files = dir.listFiles();
-            if (files == null) return out;
-            for (File f : files) {
-                if (!isLikelyRomFile(f)) continue;
-                String name = f.getName();
-                out.add(new RomSource(name, f, null, false));
-            }
-            return out;
+            return BootstrapRomCatalog.listRomSourcesFromKickstartsDir(this, kickstarts);
         } catch (Throwable ignored) {
         }
         return new ArrayList<>();
     }
 
     private List<RomSource> listAllRomSourcesForKickstartMap() {
-        ArrayList<RomSource> out = new ArrayList<>();
-        java.util.HashSet<String> seen = new java.util.HashSet<>();
-
-        // Prefer Kickstarts folder entries first, per UX request.
-        for (RomSource rs : listRomSourcesFromKickstartsDirPref()) {
-            if (rs == null) continue;
-            String key = rs.uri != null ? rs.uri.toString() : (rs.file != null ? rs.file.getAbsolutePath() : null);
-            if (key != null && seen.add(key)) out.add(rs);
+        maybeMigrateKickstartsPathPref();
+        String kickstarts = null;
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            kickstarts = p.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
+        } catch (Throwable ignored) {
         }
-
-        File romsDir = getInternalRomsDir();
-        for (File f : listRomCandidates(romsDir)) {
-            if (f == null) continue;
-            String key = f.getAbsolutePath();
-            if (key == null || !seen.add(key)) continue;
-            String name = f.getName();
-            out.add(new RomSource(name, f, null, true));
-        }
-
-        return out;
+        return BootstrapRomCatalog.listAllRomSources(this, kickstarts, getInternalRomsDir());
     }
 
     private File materializeRomSourceToInternal(RomSource src, boolean ext) {
@@ -5419,42 +5186,19 @@ public class BootstrapActivity extends Activity {
     // ── Extension validation helpers ──────────────────────────────────────────
 
     private static boolean isValidFloppyExtension(String name) {
-        if (name == null) return false;
-        String ext = lowerExt(name);
-        return "adf".equals(ext) || "zip".equals(ext);
+        return BootstrapMediaPickerUtils.isValidFloppyExtension(name);
     }
 
     private static boolean isValidHdfExtension(String name) {
-        if (name == null) return false;
-        return "hdf".equals(lowerExt(name));
+        return BootstrapMediaPickerUtils.isValidHdfExtension(name);
     }
 
     private static boolean isValidCdExtension(String name) {
-        if (name == null) return false;
-        String ext = lowerExt(name);
-        return "iso".equals(ext)
-            || "cue".equals(ext)
-            || "bin".equals(ext)
-            || "chd".equals(ext)
-            || "wav".equals(ext)
-            || "flac".equals(ext)
-            || "mp3".equals(ext)
-            || "ogg".equals(ext)
-            || "aiff".equals(ext)
-            || "aif".equals(ext);
+        return BootstrapMediaPickerUtils.isValidCdExtension(name);
     }
 
     private boolean validateAndRejectIfWrongExtension(Uri uri, String displayName, String[] allowed, String hint) {
-        if (uri == null) return false;
-        String name = displayName != null ? displayName : "";
-        String ext = lowerExt(name);
-        for (String a : allowed) {
-            if (a.equals(ext)) return false; // extension is OK
-        }
-        Toast.makeText(this,
-            "Wrong file type selected: ." + (ext.isEmpty() ? "?" : ext) + "\n" + hint,
-            Toast.LENGTH_LONG).show();
-        return true; // rejected
+        return BootstrapMediaPickerUtils.validateAndRejectIfWrongExtension(this, uri, displayName, allowed, hint);
     }
 
     // ── First-run uae4arm folder setup ────────────────────────────────────────
@@ -5483,74 +5227,45 @@ public class BootstrapActivity extends Activity {
     }
 
     private void enforceSetupOnAppUpdateIfNeeded() {
-        if (mLaunchedFromEmulatorMenu) return;
-
         try {
-            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-            long currentVersion = getCurrentAppVersionCode();
-            long currentUpdateTime = getCurrentAppLastUpdateTime();
-            if (currentVersion <= 0L && currentUpdateTime <= 0L) return;
-
-            long lastSeenVersion = prefs.getLong(PREF_LAST_APP_VERSION_CODE, -1L);
-            long lastSeenUpdateTime = prefs.getLong(PREF_LAST_APP_UPDATE_TIME, -1L);
-
-            if (lastSeenVersion < 0L && lastSeenUpdateTime < 0L) {
-                prefs.edit()
-                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
-                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
-                    .apply();
-                return;
-            }
-
-            boolean updatedByVersion = currentVersion > 0L && lastSeenVersion > 0L && currentVersion > lastSeenVersion;
-            boolean updatedByInstallTime = currentUpdateTime > 0L && currentUpdateTime != lastSeenUpdateTime;
-
-            if (updatedByVersion || updatedByInstallTime) {
-                // Only invalidate SAF/path prompt flags if the SAF permission is actually gone;
-                // don't nag the user on every debug install when permission is still valid.
-                boolean safPermissionStillValid = false;
-                try {
-                    SharedPreferences uaePrefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-                    String parentTree = uaePrefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-                    if (parentTree != null && !parentTree.trim().isEmpty() && isContentUriString(parentTree)) {
-                        safPermissionStillValid = hasPersistedReadPermission(parentTree)
-                            && hasPersistedWritePermission(parentTree);
-                    } else if (parentTree == null || parentTree.trim().isEmpty()) {
-                        // No path configured at all — treat as first run.
-                        safPermissionStillValid = false;
-                    } else {
-                        // Non-SAF/local path configured — no permission needed.
-                        safPermissionStillValid = true;
-                    }
-                } catch (Throwable ignored) {
-                }
-
-                SharedPreferences.Editor ed = prefs.edit()
-                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
-                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
-                    .putBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, true);
-
-                if (!safPermissionStillValid) {
-                    ed.putBoolean(PREF_WALKTHROUGH_COMPLETED, false)
-                      .putBoolean(PREF_FIRST_RUN_DONE, false)
-                      .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, false)
-                      .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, false);
-                }
-                ed.apply();
-            } else if (currentVersion != lastSeenVersion || currentUpdateTime != lastSeenUpdateTime) {
-                prefs.edit()
-                    .putLong(PREF_LAST_APP_VERSION_CODE, currentVersion)
-                    .putLong(PREF_LAST_APP_UPDATE_TIME, currentUpdateTime)
-                    .apply();
-            }
+            SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            SharedPreferences uaePrefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            BootstrapStartupCoordinator.enforceSetupOnAppUpdateIfNeeded(
+                mLaunchedFromEmulatorMenu,
+                launcherPrefs,
+                uaePrefs,
+                getCurrentAppVersionCode(),
+                getCurrentAppLastUpdateTime(),
+                PREF_LAST_APP_VERSION_CODE,
+                PREF_LAST_APP_UPDATE_TIME,
+                PREF_FORCE_WALKTHROUGH_ON_NEXT_START,
+                PREF_WALKTHROUGH_COMPLETED,
+                PREF_FIRST_RUN_DONE,
+                PREF_PATHS_PARENT_PROMPT_SHOWN,
+                PREF_REQUIRED_PATHS_PROMPT_SHOWN,
+                startupSafPermissionChecker()
+            );
         } catch (Throwable ignored) {
         }
     }
 
+    private BootstrapStartupCoordinator.SafPermissionChecker startupSafPermissionChecker() {
+        return new BootstrapStartupCoordinator.SafPermissionChecker() {
+            @Override
+            public boolean hasReadPermission(String uriString) {
+                return hasPersistedReadPermission(uriString);
+            }
+
+            @Override
+            public boolean hasWritePermission(String uriString) {
+                return hasPersistedWritePermission(uriString);
+            }
+        };
+    }
+
     private void maybeSetupFirstRunFolders() {
-        SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        if (prefs.getBoolean(PREF_FIRST_RUN_DONE, false)) return;
-        prefs.edit().putBoolean(PREF_FIRST_RUN_DONE, true).apply();
+        SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        BootstrapStartupCoordinator.markFirstRunDoneIfNeeded(launcherPrefs, PREF_FIRST_RUN_DONE);
     }
 
     private boolean hasUsablePathSetupForStartup() {
@@ -5578,25 +5293,20 @@ public class BootstrapActivity extends Activity {
     }
 
     private void maybeLaunchStartupWalkthrough(Bundle savedInstanceState) {
-        if (mLaunchedFromEmulatorMenu) return;
-        if (savedInstanceState != null) return;
-
         try {
             SharedPreferences launcherPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
             SharedPreferences uaePrefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 
-            boolean forceWalkthrough = launcherPrefs.getBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, false);
-            boolean walkthroughCompleted = uaePrefs.getBoolean(WalkthroughActivity.PREF_WALKTHROUGH_COMPLETED, false);
-            boolean walkthroughDisabled = uaePrefs.getBoolean(WalkthroughActivity.PREF_WALKTHROUGH_DISABLED, false);
-
-            boolean needsSetup = !hasUsablePathSetupForStartup();
-            boolean shouldLaunch = forceWalkthrough || (!walkthroughDisabled && (!walkthroughCompleted || needsSetup));
+            boolean shouldLaunch = BootstrapStartupCoordinator.shouldLaunchStartupWalkthrough(
+                mLaunchedFromEmulatorMenu,
+                savedInstanceState,
+                launcherPrefs,
+                uaePrefs,
+                PREF_FORCE_WALKTHROUGH_ON_NEXT_START,
+                PREF_FIRST_RUN_DONE,
+                startupPathSetupChecker()
+            );
             if (!shouldLaunch) return;
-
-            launcherPrefs.edit()
-                .putBoolean(PREF_FORCE_WALKTHROUGH_ON_NEXT_START, false)
-                .putBoolean(PREF_FIRST_RUN_DONE, true)
-                .apply();
 
             Intent i = new Intent(this, WalkthroughActivity.class);
             i.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
@@ -5606,44 +5316,22 @@ public class BootstrapActivity extends Activity {
         }
     }
 
+    private BootstrapStartupCoordinator.PathSetupChecker startupPathSetupChecker() {
+        return new BootstrapStartupCoordinator.PathSetupChecker() {
+            @Override
+            public boolean hasUsablePathSetupForStartup() {
+                return BootstrapActivity.this.hasUsablePathSetupForStartup();
+            }
+        };
+    }
+
     private void pickDisk(int requestCode) {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        // Floppy images: ADF/ZIP (provider support varies, extension checks enforce this).
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-            "application/zip",
-            "application/x-zip-compressed",
-            "application/octet-stream"
-        });
-        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_FLOPPIES_DIR);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-        }
+        Intent intent = BootstrapMediaPickerUtils.createFloppyPickIntent(this::maybeSetInitialUriFromUaePathPref);
         startActivityForResult(intent, requestCode);
     }
 
     private void pickCdImage0() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        // CD images: ISO/CUE/BIN/CHD (provider support varies, extension checks enforce this).
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-            "application/octet-stream",
-            "application/x-cd-image",
-            "application/x-iso9660-image"
-        });
-        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_CDROMS_DIR);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
-            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
-        }
+        Intent intent = BootstrapMediaPickerUtils.createCdPickIntent(this::maybeSetInitialUriFromUaePathPref);
         startActivityForResult(intent, REQ_IMPORT_CDIMAGE0);
     }
 
@@ -5742,6 +5430,7 @@ public class BootstrapActivity extends Activity {
         if (cdResId == 0) cdResId = R.drawable.featured_default;
         int lhaResId = getResources().getIdentifier("featured_whdload", "drawable", getPackageName());
         if (lhaResId == 0) lhaResId = hdResId;
+        final boolean agsAutoMountEnabled = isAgsAutoMountEnabled();
 
         addDriveIcon(rowTop, hasDf0() ? dfInsertedResId : dfEmptyResId, "DF0", true, hasDf0(), iconSizePx, 0,
             v -> onFloppySlotTapped(0), null, getDriveMediaName("DF", 0));
@@ -5755,25 +5444,34 @@ public class BootstrapActivity extends Activity {
             v -> onFloppySlotTapped(3), v -> { promptRemoveExternalDrive(); return true; },
             getDriveMediaName("DF", 3));
 
-        addDriveIcon(rowBottom, hdResId, "DH0", isDhSlotEnabled(0), hasDhMedia(0), iconSizePx, 0,
+        View topGroupGap = new View(this);
+        LinearLayout.LayoutParams topGroupGapLp = new LinearLayout.LayoutParams((int)(26 * density), 1);
+        topGroupGapLp.setMargins((int)(8 * density), 0, (int)(4 * density), 0);
+        topGroupGap.setLayoutParams(topGroupGapLp);
+        rowTop.addView(topGroupGap);
+
+        addDriveIcon(rowTop, lhaResId, "LHA", true, false, iconSizePx, 0,
+            v -> startActivity(new Intent(this, LhaLibraryActivity.class)), null, "(WHDLoad)");
+
+        addDriveIcon(rowBottom, hdResId, "DH0", !agsAutoMountEnabled && isDhSlotEnabled(0), hasDhMedia(0), iconSizePx, 0,
             v -> onHardDriveSlotTapped(0), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 0));
-        addDriveIcon(rowBottom, hdResId, "DH1", isDhSlotEnabled(1), hasDhMedia(1), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH1", !agsAutoMountEnabled && isDhSlotEnabled(1), hasDhMedia(1), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(1), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 1));
-        addDriveIcon(rowBottom, hdResId, "DH2", isDhSlotEnabled(2), hasDhMedia(2), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH2", !agsAutoMountEnabled && isDhSlotEnabled(2), hasDhMedia(2), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(2), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 2));
-        addDriveIcon(rowBottom, hdResId, "DH3", isDhSlotEnabled(3), hasDhMedia(3), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH3", !agsAutoMountEnabled && isDhSlotEnabled(3), hasDhMedia(3), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(3), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 3));
-        addDriveIcon(rowBottom, hdResId, "DH4", isDhSlotEnabled(4), hasDhMedia(4), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH4", !agsAutoMountEnabled && isDhSlotEnabled(4), hasDhMedia(4), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(4), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 4));
-        addDriveIcon(rowBottom, hdResId, "DH5", isDhSlotEnabled(5), hasDhMedia(5), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH5", !agsAutoMountEnabled && isDhSlotEnabled(5), hasDhMedia(5), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(5), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 5));
-        addDriveIcon(rowBottom, hdResId, "DH6", isDhSlotEnabled(6), hasDhMedia(6), iconSizePx, marginPx,
+        addDriveIcon(rowBottom, hdResId, "DH6", !agsAutoMountEnabled && isDhSlotEnabled(6), hasDhMedia(6), iconSizePx, marginPx,
             v -> onHardDriveSlotTapped(6), v -> { promptRemoveHardDrive(); return true; },
             getDriveMediaName("DH", 6));
 
@@ -5783,10 +5481,43 @@ public class BootstrapActivity extends Activity {
         bottomSpacer.setLayoutParams(bottomSpacerLp);
         rowBottom.addView(bottomSpacer);
 
-        addDriveIcon(rowBottom, cdResId, "CD0", isCdSlotEnabled(), hasCd0(), iconSizePx, marginPx,
-            v -> onCdSlotTapped(), null, getDriveMediaName("CD", 0));
-        addDriveIcon(rowBottom, lhaResId, "LHA", true, false, iconSizePx, marginPx,
-            v -> startActivity(new Intent(this, WHDBooterActivity.class)), null, "(WHDLoad)");
+        if (!isAgsAutoMountEnabled()) {
+            addDriveIcon(rowBottom, cdResId, "CD0", isCdSlotEnabled(), hasCd0(), iconSizePx, marginPx,
+                v -> onCdSlotTapped(), null, getDriveMediaName("CD", 0));
+        }
+
+        View actionGroupGap = new View(this);
+        LinearLayout.LayoutParams actionGroupGapLp = new LinearLayout.LayoutParams((int)(42 * density), 1);
+        actionGroupGapLp.setMargins((int)(8 * density), 0, (int)(4 * density), 0);
+        actionGroupGap.setLayoutParams(actionGroupGapLp);
+        rowBottom.addView(actionGroupGap);
+
+        int playResId = getResources().getIdentifier("ic_play_white", "drawable", getPackageName());
+        if (playResId == 0) playResId = android.R.drawable.ic_media_play;
+        int restartResId = getResources().getIdentifier("ic_restart_white", "drawable", getPackageName());
+        if (restartResId == 0) restartResId = android.R.drawable.ic_popup_sync;
+        int exitResId = getResources().getIdentifier("ic_close_white", "drawable", getPackageName());
+        if (exitResId == 0) exitResId = android.R.drawable.ic_menu_close_clear_cancel;
+        int setupResId = getResources().getIdentifier("ic_settings_white", "drawable", getPackageName());
+        if (setupResId == 0) setupResId = android.R.drawable.ic_menu_preferences;
+        int agsResId = android.R.drawable.ic_menu_manage;
+        final int actionSpacingPx = (int)(12 * density);
+
+        addDriveIcon(rowBottom, playResId, "PLAY", true, false, iconSizePx, marginPx,
+            v -> startEmulator(), null, null);
+        addDriveIcon(rowBottom, agsResId, "AGS", true, false, iconSizePx, actionSpacingPx,
+            v -> startAgsSetupOrLaunch(), null, null);
+        addDriveIcon(rowBottom, restartResId, "RESTART", true, false, iconSizePx, actionSpacingPx,
+            v -> showRestartConfirmDialog(), null, null);
+        addDriveIcon(rowBottom, setupResId, "SETUP", true, false, iconSizePx, actionSpacingPx,
+            v -> {
+                Intent i = new Intent(this, WalkthroughActivity.class);
+                i.putExtra(WalkthroughActivity.EXTRA_FORCE_WALKTHROUGH, true);
+                startActivity(i);
+            }, null, null);
+
+        addDriveIcon(rowBottom, exitResId, "EXIT", true, false, iconSizePx, actionSpacingPx,
+            v -> showExitConfirmDialog(), null, null);
 
         strip.addView(rowTop);
         strip.addView(rowBottom);
@@ -5807,18 +5538,19 @@ public class BootstrapActivity extends Activity {
 
     private boolean isDhSlotEnabled(int slot) {
         switch (slot) {
-            case 0: return mDh0Added || hasDhMedia(0);
-            case 1: return mDh1Added || hasDhMedia(1);
-            case 2: return mDh2Added || hasDhMedia(2);
-            case 3: return mDh3Added || hasDhMedia(3);
-            case 4: return mDh4Added || hasDhMedia(4);
-            case 5: return mDh5Added || hasDhMedia(5);
-            case 6: return mDh6Added || hasDhMedia(6);
+            case 0: return mDh0Added;
+            case 1: return mDh1Added;
+            case 2: return mDh2Added;
+            case 3: return mDh3Added;
+            case 4: return mDh4Added;
+            case 5: return mDh5Added;
+            case 6: return mDh6Added;
             default: return false;
         }
     }
 
     private boolean isCdSlotEnabled() {
+        if (isAgsAutoMountEnabled()) return false;
         return mCd0Added || hasCd0();
     }
 
@@ -5896,60 +5628,54 @@ public class BootstrapActivity extends Activity {
         }
         refreshStatus();
 
-        final boolean isDh0 = slot == 0;
-        final String[] options = isDh0
-            ? new String[]{"Choose HDF file", "Choose folder", "AGS auto-mount setup", "Set label", "Clear slot"}
-            : new String[]{"Choose HDF file", "Choose folder", "Set label", "Clear slot"};
-        new AlertDialog.Builder(this)
-            .setTitle("DH" + slot)
-            .setItems(options, (d, which) -> {
-                if (which == 0) {
-                    if (slot == 0) pickDh0Hdf();
-                    else if (slot == 1) pickDh1Hdf();
-                    else if (slot == 2) pickDh2Hdf();
-                    else if (slot == 3) pickDh3Hdf();
-                    else if (slot == 4) pickDh4Hdf();
-                    else if (slot == 5) pickDh5Hdf();
-                    else pickDh6Hdf();
-                    return;
-                }
+        BootstrapHardDriveSlotDialog.show(this, slot, false, new BootstrapHardDriveSlotDialog.Actions() {
+            @Override
+            public void pickHdf(int targetSlot) {
+                if (targetSlot == 0) pickDh0Hdf();
+                else if (targetSlot == 1) pickDh1Hdf();
+                else if (targetSlot == 2) pickDh2Hdf();
+                else if (targetSlot == 3) pickDh3Hdf();
+                else if (targetSlot == 4) pickDh4Hdf();
+                else if (targetSlot == 5) pickDh5Hdf();
+                else pickDh6Hdf();
+            }
 
-                if (which == 1) {
-                    if (slot == 0) pickDh0Folder();
-                    else if (slot == 1) pickDh1Folder();
-                    else if (slot == 2) pickDh2Folder();
-                    else if (slot == 3) pickDh3Folder();
-                    else if (slot == 4) pickDh4Folder();
-                    else if (slot == 5) pickDh5Folder();
-                    else pickDh6Folder();
-                    return;
-                }
+            @Override
+            public void pickFolder(int targetSlot) {
+                if (targetSlot == 0) pickDh0Folder();
+                else if (targetSlot == 1) pickDh1Folder();
+                else if (targetSlot == 2) pickDh2Folder();
+                else if (targetSlot == 3) pickDh3Folder();
+                else if (targetSlot == 4) pickDh4Folder();
+                else if (targetSlot == 5) pickDh5Folder();
+                else pickDh6Folder();
+            }
 
-                if (isDh0 && which == 2) {
-                    startActivity(new Intent(this, DrivesOptionsActivity.class));
-                    return;
-                }
+            @Override
+            public void openAgsSetup() {
+                startActivity(new Intent(BootstrapActivity.this, DrivesOptionsActivity.class));
+            }
 
-                int labelIndex = isDh0 ? 3 : 2;
-                if (which == labelIndex) {
-                    promptDhVolumeNameThen(slot, () -> {
-                        applyDhVolumeNameToUaePrefs(slot);
-                        refreshStatus();
-                    });
-                    return;
-                }
+            @Override
+            public void setLabel(int targetSlot) {
+                promptDhVolumeNameThen(targetSlot, () -> {
+                    applyDhVolumeNameToUaePrefs(targetSlot);
+                    refreshStatus();
+                });
+            }
 
-                if (slot == 0) {
+            @Override
+            public void clearSlot(int targetSlot) {
+                if (targetSlot == 0) {
                     clearDh0FromUaePrefs();
-                } else if (slot == 1) {
+                } else if (targetSlot == 1) {
                     removeDh1CompletelyFromUaePrefs();
                 } else {
-                    removeDhCompletelyFromUaePrefs(slot);
+                    removeDhCompletelyFromUaePrefs(targetSlot);
                 }
                 refreshStatus();
-            })
-            .setNegativeButton(android.R.string.cancel, null)
-            .show();
+            }
+        });
     }
 
     /** Get the display name for media in the given drive slot. */
@@ -6001,7 +5727,9 @@ public class BootstrapActivity extends Activity {
         iv.setImageResource(drawableResId);
         iv.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
         iv.setContentDescription(label);
-        iv.setAlpha(enabled ? (hasMedia ? 1.0f : 0.72f) : 0.35f);
+        boolean isDhSlot = label != null && label.startsWith("DH");
+        boolean showCross = !enabled || (isDhSlot && !hasMedia);
+        iv.setAlpha(showCross ? 0.35f : (hasMedia ? 1.0f : 0.72f));
         android.widget.FrameLayout.LayoutParams ivLp = new android.widget.FrameLayout.LayoutParams(iconSizePx, iconSizePx);
         iv.setLayoutParams(ivLp);
 
@@ -6024,7 +5752,7 @@ public class BootstrapActivity extends Activity {
         disabledOverlay.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
         disabledOverlay.setTypeface(null, android.graphics.Typeface.BOLD);
         disabledOverlay.setTextColor(0xCCFF5A5A);
-        disabledOverlay.setVisibility(enabled ? View.GONE : View.VISIBLE);
+        disabledOverlay.setVisibility(showCross ? View.VISIBLE : View.GONE);
         disabledOverlay.setClickable(false);
         disabledOverlay.setFocusable(false);
         iconWrap.addView(disabledOverlay);
@@ -6043,6 +5771,23 @@ public class BootstrapActivity extends Activity {
         tv.setTypeface(null, android.graphics.Typeface.BOLD);
         tv.setGravity(android.view.Gravity.CENTER);
         container.addView(tv);
+
+        boolean isDfOrDhSlot = label != null && (label.startsWith("DF") || label.startsWith("DH"));
+        String mediaRaw = safeTrim(mediaName);
+        String media = mediaRaw.isEmpty() ? "" : shortLabelForPath(mediaRaw);
+        if (!isDfOrDhSlot && !media.isEmpty()) {
+            TextView mediaTv = new TextView(this);
+            mediaTv.setText(media);
+            mediaTv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 8.5f);
+            mediaTv.setTextColor(0xCCFFFFFF);
+            mediaTv.setMaxLines(1);
+            mediaTv.setSingleLine(true);
+            mediaTv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            mediaTv.setGravity(android.view.Gravity.CENTER);
+            mediaTv.setMaxWidth(iconSizePx + (int) (12 * getResources().getDisplayMetrics().density));
+            mediaTv.setAlpha(enabled ? 0.95f : 0.70f);
+            container.addView(mediaTv);
+        }
 
         strip.addView(container);
     }
@@ -6073,6 +5818,24 @@ public class BootstrapActivity extends Activity {
 
         if (parts.isEmpty()) return "Inserted: (none)";
         return "Inserted: " + TextUtils.join("  |  ", parts);
+    }
+
+    private void showRestartConfirmDialog() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Restart")
+            .setMessage("Eject all media and reset device to defaults?")
+            .setPositiveButton("Restart", (d, w) -> performRestart())
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
+    }
+
+    private void showExitConfirmDialog() {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("Exit")
+            .setMessage("Close the app now?")
+            .setPositiveButton("Exit", (d, w) -> quitAppFully())
+            .setNegativeButton(android.R.string.cancel, null)
+            .show();
     }
 
     /** Build the model RadioGroup as two columns: main models left, CD32/CDTV right. */
@@ -6655,7 +6418,225 @@ public class BootstrapActivity extends Activity {
         }
     }
 
+    private boolean isAgsAutoMountEnabled() {
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            boolean enabled = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+            boolean launchOnce = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false);
+            return enabled && launchOnce;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private boolean isAgsReadyForDirectLaunch() {
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            boolean enabled = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false);
+            String base = safeTrim(p.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, null));
+            if (!enabled || base.isEmpty()) return false;
+
+            String workbench = findAgsNamedChildForBootstrap(base, "Workbench.hdf", false, 4);
+            if (workbench == null || workbench.trim().isEmpty()) return false;
+
+            String shared = findAgsNamedChildForBootstrap(base, "SHARED", true, 4);
+            if (shared == null || shared.trim().isEmpty()) {
+                shared = findAgsNamedChildForBootstrap(base, "SHARD", true, 4);
+            }
+            return shared != null && !shared.trim().isEmpty();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private String findAgsNamedChildForBootstrap(String basePathOrTreeUri, String childName, boolean directory, int maxDepth) {
+        if (basePathOrTreeUri == null || basePathOrTreeUri.trim().isEmpty()) return null;
+        if (childName == null || childName.trim().isEmpty()) return null;
+        if (maxDepth < 0) return null;
+
+        String base = basePathOrTreeUri.trim();
+        String target = childName.trim();
+
+        if (ConfigStorage.isSafJoinedPath(base)) {
+            try {
+                ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(base);
+                if (sp == null || sp.treeUri == null || sp.treeUri.trim().isEmpty()) return null;
+                DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(sp.treeUri.trim()));
+                if (root == null || !root.isDirectory()) return null;
+                DocumentFile current = root;
+
+                String rel = sp.relPath == null ? "" : sp.relPath.trim();
+                while (rel.startsWith("/")) rel = rel.substring(1);
+                while (rel.endsWith("/")) rel = rel.substring(0, rel.length() - 1);
+                if (!rel.isEmpty()) {
+                    String[] parts = rel.split("/");
+                    for (String part : parts) {
+                        String name = part == null ? "" : part.trim();
+                        if (name.isEmpty()) continue;
+                        DocumentFile next = current.findFile(name);
+                        if (next == null || !next.isDirectory()) return null;
+                        current = next;
+                    }
+                }
+
+                return findAgsNamedSafRecursiveForBootstrap(current, target, directory, 0, maxDepth);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        if (base.startsWith("content://")) {
+            try {
+                DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(base));
+                return findAgsNamedSafRecursiveForBootstrap(root, target, directory, 0, maxDepth);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        return findAgsNamedFileRecursiveForBootstrap(new File(base), target, directory, 0, maxDepth);
+    }
+
+    private String findAgsNamedFileRecursiveForBootstrap(File dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+
+        for (File kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getAbsolutePath();
+                if (!directory && kid.isFile()) return kid.getAbsolutePath();
+            }
+        }
+
+        for (File kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findAgsNamedFileRecursiveForBootstrap(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+        return null;
+    }
+
+    private String findAgsNamedSafRecursiveForBootstrap(DocumentFile dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        DocumentFile[] kids;
+        try {
+            kids = dir.listFiles();
+        } catch (Throwable ignored) {
+            return null;
+        }
+        if (kids == null) return null;
+
+        for (DocumentFile kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getUri().toString();
+                if (!directory && kid.isFile()) return kid.getUri().toString();
+            }
+        }
+
+        for (DocumentFile kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findAgsNamedSafRecursiveForBootstrap(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+        return null;
+    }
+
+    private void applyAgsLaunchProfile() {
+        int a1200Index = indexOfModelId("A1200", 0);
+        mSuppressUiCallbacks = true;
+        try {
+            if (mQsModelSpinner != null) {
+                int cur = mQsModelSpinner.getSelectedItemPosition();
+                if (cur != a1200Index) {
+                    mQsModelSpinner.setSelection(a1200Index);
+                }
+            }
+            updateConfigSpinnerForModel(a1200Index, encodeConfigWithRtg(0, RTG_MODE_ON));
+
+            if (mEasyRtg != null) mEasyRtg.setChecked(true);
+            if (mEasyJit != null) mEasyJit.setChecked(true);
+            if (mEasyChip != null) mEasyChip.setSelection(indexOfIntValue(EASY_CHIP_VALUES, 4, 0));
+            if (mEasyZ3 != null) mEasyZ3.setSelection(EASY_Z3_MB.length - 1);
+
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREF_QS_MODEL, "A1200")
+                .putInt(PREF_QS_CONFIG, encodeConfigWithRtg(0, RTG_MODE_ON))
+                .apply();
+        } finally {
+            mSuppressUiCallbacks = false;
+        }
+
+        syncRadioToSpinner();
+        updateModelImage();
+        updateModelQuickOptionButtons();
+        syncQuickstartToUaePrefs();
+    }
+
+    private void startAgsSetupOrLaunch() {
+        if (isAgsReadyForDirectLaunch()) {
+            try {
+                getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, true)
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, true)
+                    .apply();
+            } catch (Throwable ignored) {
+            }
+
+            try {
+                applyAgsLaunchProfile();
+            } catch (Throwable ignored) {
+            }
+
+            try {
+                startEmulator();
+            } catch (Throwable ignored) {
+            }
+            return;
+        }
+
+        startActivity(new Intent(this, DrivesOptionsActivity.class));
+    }
+
+    private void maybeLaunchAgsFromSetupIntent(Intent intent) {
+        if (intent == null) return;
+        if (!intent.getBooleanExtra(EXTRA_LAUNCH_AGS_FROM_SETUP, false)) return;
+
+        intent.removeExtra(EXTRA_LAUNCH_AGS_FROM_SETUP);
+
+        try {
+            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, true)
+                .apply();
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            applyAgsLaunchProfile();
+        } catch (Throwable ignored) {
+        }
+
+        try {
+            startEmulator();
+        } catch (Throwable ignored) {
+        }
+    }
+
     private boolean hasCd0() {
+        if (isAgsAutoMountEnabled()) return false;
         String cdPath = (mSelectedCd0Path != null && !mSelectedCd0Path.trim().isEmpty())
             ? mSelectedCd0Path
             : (mSelectedCd0 != null ? mSelectedCd0.getAbsolutePath() : null);
@@ -6687,6 +6668,7 @@ public class BootstrapActivity extends Activity {
 
     private void refreshStatus() {
         boolean cdOnly = isCdOnlyModel();
+        boolean agsAutoMountEnabled = isAgsAutoMountEnabled();
         String dh0Mode = getDh0Mode();
         String baseModelId = getSelectedQsModelId();
 
@@ -6727,7 +6709,7 @@ public class BootstrapActivity extends Activity {
         }
 
         if (mCd0Status != null) {
-            if (cdOnly) {
+            if (cdOnly || agsAutoMountEnabled) {
                 mCd0Status.setVisibility(View.GONE);
             } else {
                 mCd0Status.setVisibility(View.VISIBLE);
@@ -6748,43 +6730,39 @@ public class BootstrapActivity extends Activity {
         }
 
         if (mDf0Status != null) {
-            // CD32/CDTV: no floppy drives by default.
-            if (cdOnly) {
-                mDf0Status.setVisibility(View.GONE);
-            } else {
-                // DF0 is always present (may be empty).
-                mDf0Status.setVisibility(View.VISIBLE);
-                mDf0Status.setText(labelWithSource("DF0", mSelectedDf0, mDf0SourceName, mSelectedDf0Path));
-            }
+            mDf0Status.setVisibility(View.GONE);
         }
         if (mDf1Status != null) {
-            mDf1Status.setText(labelWithSource("DF1", mSelectedDf1, mDf1SourceName, mSelectedDf1Path));
+            mDf1Status.setVisibility(View.GONE);
         }
 
         boolean showDf1Controls = !cdOnly && mDf1Added;
-        // Show "+DF" button when not in CD-only mode (always available to add drives)
-        if (mBtnAddDf1 != null) mBtnAddDf1.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
         if (mDf1Controls != null) {
             mDf1Controls.setVisibility(showDf1Controls ? View.VISIBLE : View.GONE);
         }
 
         View bootLabel = findViewById(R.id.txtBootMediumLabel);
-        View btnAddDh0 = findViewById(R.id.btnAddDh0);
         View dh0Section = findViewById(R.id.dh0Section);
 
-        View btnAddCd0 = findViewById(R.id.btnAddCd0);
-        View btnAddWhd = findViewById(R.id.btnWHDBooter);
+        View btnAgsPanel = findViewById(R.id.btnAgsPanel);
         View mediaActionsColumn = findViewById(R.id.mediaActionsColumn);
         View cd0Section = findViewById(R.id.cd0Section);
+        boolean agsReadyForDirectLaunch = isAgsReadyForDirectLaunch();
 
         if (bootLabel != null) bootLabel.setVisibility(View.GONE);
 
-        boolean showDh0 = !cdOnly && (mDh0Added || hasDh0());
+        boolean showDh0 = !cdOnly && !agsAutoMountEnabled && (mDh0Added || hasDh0());
 
-        // "+ HD" is now an entry point to the storage modal (allow opening even when DH0 already added).
-        if (btnAddDh0 != null) btnAddDh0.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
-        if (btnAddWhd != null) btnAddWhd.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
-        if (dh0Section != null) dh0Section.setVisibility(showDh0 ? View.VISIBLE : View.GONE);
+        if (btnAgsPanel != null) {
+            btnAgsPanel.setVisibility(!cdOnly ? View.VISIBLE : View.GONE);
+            btnAgsPanel.setEnabled(true);
+            btnAgsPanel.setClickable(true);
+            btnAgsPanel.setAlpha(1.0f);
+            if (btnAgsPanel instanceof Button) {
+                ((Button) btnAgsPanel).setText(agsReadyForDirectLaunch ? "AGS" : "AGS SETUP");
+            }
+        }
+        if (dh0Section != null) dh0Section.setVisibility(View.GONE);
 
         if (mediaActionsColumn instanceof LinearLayout) {
             ((LinearLayout) mediaActionsColumn).setGravity(cdOnly ? (Gravity.BOTTOM | Gravity.START) : Gravity.CENTER_HORIZONTAL);
@@ -6799,40 +6777,11 @@ public class BootstrapActivity extends Activity {
         boolean showDh1Controls = showDh0 && (mDh1Added || hasDh1());
 
         if (mDh0Status != null) {
-            if (!showDh0) {
-                mDh0Status.setVisibility(View.GONE);
-            } else {
-                mDh0Status.setVisibility(View.VISIBLE);
-                if (DH0_MODE_DIR.equals(dh0Mode)) {
-                    String label = (mDh0SourceName != null && !mDh0SourceName.trim().isEmpty()) ? mDh0SourceName : "(folder)";
-                    if (mSelectedDh0Dir != null && mSelectedDh0Dir.exists() && mSelectedDh0Dir.isDirectory()) {
-                        mDh0Status.setText("DH0 Folder: " + label);
-                    } else {
-                        mDh0Status.setText("DH0 Folder: (not selected)");
-                    }
-                } else {
-                    mDh0Status.setText(labelWithSource("DH0 HDF", mSelectedDh0Hdf, mDh0SourceName, mSelectedDh0HdfPath));
-                }
-            }
+            mDh0Status.setVisibility(View.GONE);
         }
 
         if (mDh1Status != null) {
-            if (!showDh1Controls) {
-                mDh1Status.setVisibility(View.GONE);
-            } else {
-                mDh1Status.setVisibility(View.VISIBLE);
-                String dh1Mode = getDh1Mode();
-                if (DH1_MODE_DIR.equals(dh1Mode)) {
-                    String label = (mDh1SourceName != null && !mDh1SourceName.trim().isEmpty()) ? mDh1SourceName : "(folder)";
-                    if (mSelectedDh1Dir != null && mSelectedDh1Dir.exists() && mSelectedDh1Dir.isDirectory()) {
-                        mDh1Status.setText("DH1 Folder: " + label);
-                    } else {
-                        mDh1Status.setText("DH1 Folder: (not selected)");
-                    }
-                } else {
-                    mDh1Status.setText(labelWithSource("DH1 HDF", mSelectedDh1Hdf, mDh1SourceName, mSelectedDh1HdfPath));
-                }
-            }
+            mDh1Status.setVisibility(View.GONE);
         }
 
         View btnPickDf0 = findViewById(R.id.btnPickDf0);
@@ -6844,39 +6793,9 @@ public class BootstrapActivity extends Activity {
         if (btnPickDf1 != null) btnPickDf1.setVisibility(View.GONE);
         if (btnClearDf1 != null) btnClearDf1.setVisibility(View.GONE);
 
-        boolean showCd0 = !cdOnly && mCd0Added;
-        // "+ CD" is now an entry point to the storage modal (always available).
-        if (btnAddCd0 != null) {
-            btnAddCd0.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
-            if (btnAddCd0 instanceof Button) {
-                Button cdButton = (Button) btnAddCd0;
-                cdButton.setText(cdOnly ? "💿 Load CD" : "+CD");
-                cdButton.setContentDescription(cdOnly ? "Load CD" : "Add CD");
-                if (cdOnly) {
-                    float density = getResources().getDisplayMetrics().density;
-                    cdButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
-                    cdButton.setMinWidth((int) (96 * density));
-                    cdButton.setMinHeight((int) (96 * density));
-                    ViewGroup.LayoutParams lp = cdButton.getLayoutParams();
-                    if (lp != null) {
-                        lp.height = (int) (96 * density);
-                        cdButton.setLayoutParams(lp);
-                    }
-                } else {
-                    float density = getResources().getDisplayMetrics().density;
-                    cdButton.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
-                    cdButton.setMinWidth(0);
-                    cdButton.setMinHeight(0);
-                    ViewGroup.LayoutParams lp = cdButton.getLayoutParams();
-                    if (lp != null) {
-                        lp.height = (int) (48 * density);
-                        cdButton.setLayoutParams(lp);
-                    }
-                }
-            }
-        }
+        boolean showCd0 = !cdOnly && !agsAutoMountEnabled && mCd0Added;
         if (mBtnCdCorner != null) {
-            mBtnCdCorner.setVisibility(cdOnly ? View.VISIBLE : View.GONE);
+            mBtnCdCorner.setVisibility((cdOnly && !agsAutoMountEnabled) ? View.VISIBLE : View.GONE);
             if (mBtnCdCorner instanceof Button) {
                 Button cdCorner = (Button) mBtnCdCorner;
                 cdCorner.setText("💿 Load CD");
@@ -7305,22 +7224,8 @@ public class BootstrapActivity extends Activity {
         }
 
         mDf1Controls = findViewById(R.id.df1Controls);
-        mBtnAddDf1 = findViewById(R.id.btnAddDf1);
-        mBtnAddDh0 = findViewById(R.id.btnAddDh0);
         mCd0Section = findViewById(R.id.cd0Section);
-        mBtnAddCd0 = findViewById(R.id.btnAddCd0);
         mBtnCdCorner = findViewById(R.id.btnCdCorner);
-
-        // WHDLoad functionality now handled by WHDBooterActivity
-
-        // WHDBooter dedicated button - launches the new WHDBooter screen
-        View btnWHDBooter = findViewById(R.id.btnWHDBooter);
-        if (btnWHDBooter != null) {
-            btnWHDBooter.setOnClickListener(v -> {
-                Intent i = new Intent(this, WHDBooterActivity.class);
-                startActivity(i);
-            });
-        }
 
         // When invoked from the emulator MENU overlay, do not allow direct media edits in-place.
         // Users must intentionally open the separate Media Swapper UI.
@@ -7756,7 +7661,7 @@ public class BootstrapActivity extends Activity {
         }
         View btnAddLha = findViewById(R.id.btnAddLha);
         if (btnAddLha != null) {
-            btnAddLha.setOnClickListener(v -> startActivity(new Intent(this, WHDBooterActivity.class)));
+            btnAddLha.setOnClickListener(v -> startActivity(new Intent(this, LhaLibraryActivity.class)));
         }
 
         // External floppy image: single-click = insert disk, long-press = remove drive
@@ -7776,26 +7681,6 @@ public class BootstrapActivity extends Activity {
             hdImage.setOnLongClickListener(v -> {
                 promptRemoveHardDrive();
                 return true;
-            });
-        }
-
-        // +DF button: add an empty floppy drive (user clicks the image to insert media)
-        if (mBtnAddDf1 != null) {
-            mBtnAddDf1.setOnClickListener(v -> addNextEmptyFloppySlot());
-        }
-
-        // +HD button: add an empty hard drive slot (user clicks the image to insert media)
-        if (mBtnAddDh0 != null) {
-            mBtnAddDh0.setOnClickListener(v -> showMediaSwapperDialog(MEDIA_SECTION_HD));
-        }
-
-        if (mBtnAddCd0 != null) {
-            mBtnAddCd0.setOnClickListener(v -> {
-                if (isCdOnlyModel()) {
-                    ensureCd0AndPick();
-                } else {
-                    showMediaSwapperDialog(MEDIA_SECTION_CD);
-                }
             });
         }
 
@@ -7882,28 +7767,19 @@ public class BootstrapActivity extends Activity {
             btnStartPanel.setOnClickListener(v -> startEmulator());
         }
 
+        Button btnAgsPanel = findViewById(R.id.btnAgsPanel);
+        if (btnAgsPanel != null) {
+            btnAgsPanel.setOnClickListener(v -> startAgsSetupOrLaunch());
+        }
+
         Button btnRestart = findViewById(R.id.btnRestart);
         if (btnRestart != null) {
-            btnRestart.setOnClickListener(v -> {
-                new android.app.AlertDialog.Builder(this)
-                    .setTitle("Restart")
-                    .setMessage("Eject all media and reset device to defaults?")
-                    .setPositiveButton("Restart", (d, w) -> performRestart())
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-            });
+            btnRestart.setOnClickListener(v -> showRestartConfirmDialog());
         }
 
         Button btnColdReset = findViewById(R.id.btnColdReset);
         if (btnColdReset != null) {
-            btnColdReset.setOnClickListener(v -> {
-                new android.app.AlertDialog.Builder(this)
-                    .setTitle("Exit")
-                    .setMessage("Close the app now?")
-                    .setPositiveButton("Exit", (d, w) -> quitAppFully())
-                    .setNegativeButton(android.R.string.cancel, null)
-                    .show();
-            });
+            btnColdReset.setOnClickListener(v -> showExitConfirmDialog());
         }
 
         // First-install/setup: launch walkthrough when setup is incomplete or explicitly forced.
@@ -7914,6 +7790,8 @@ public class BootstrapActivity extends Activity {
 
         refreshStatus();
         applyFeaturedGraphic();
+
+        maybeLaunchAgsFromSetupIntent(getIntent());
     }
 
     @Override
@@ -7982,163 +7860,24 @@ public class BootstrapActivity extends Activity {
         if (mPathsParentPromptShown) return;
 
         SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-        String parentTree = p.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-        String parentDir = p.getString(UaeOptionKeys.UAE_PATH_PARENT_DIR, null);
-        String conf = p.getString(UaeOptionKeys.UAE_PATH_CONF_DIR, null);
-        String roms = p.getString(UaeOptionKeys.UAE_PATH_ROMS_DIR, null);
-        String flops = p.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null);
-        String cds = p.getString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, null);
-        String hds = p.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null);
+        BootstrapPathHealthEvaluator.ParentPromptDecision decision =
+            BootstrapPathHealthEvaluator.evaluateParentPrompt(p, createPathHealthAccess());
+        if (decision == null) return;
 
-        boolean hasAnyParent = (parentTree != null && !parentTree.trim().isEmpty())
-            || (parentDir != null && !parentDir.trim().isEmpty());
+        mPathsParentPromptShown = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
+            .apply();
 
-        boolean usingSaf = isContentUriString(parentTree)
-            || ConfigStorage.isSafJoinedPath(conf)
-            || ConfigStorage.isSafJoinedPath(roms)
-            || ConfigStorage.isSafJoinedPath(flops)
-            || ConfigStorage.isSafJoinedPath(cds)
-            || ConfigStorage.isSafJoinedPath(hds);
-
-        // If the user hasn't set any Paths parent folder at all, prompt on app open.
-        if (!hasAnyParent) {
-            mPathsParentPromptShown = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
-                .apply();
-            showReselectDialog(
-                "Set Paths Parent Folder",
-                "Paths parent folder is not set.\n\nPlease select a parent folder in Paths so configs and media can be accessed.",
-                this::openPathsAndAutoPickSafParent
-            );
-            return;
-        }
-
-        // If not using SAF, nothing more to do here.
-        if (!usingSaf) {
-            // On newer Android versions, raw /storage paths can be unreadable even if configured.
-            // If the configured config folder isn't accessible, prompt the user to use Paths
-            // (ideally selecting a SAF parent folder) so configs can be saved/loaded.
-            try {
-                if (conf != null && !conf.trim().isEmpty() && !isContentUriString(conf) && !ConfigStorage.isSafJoinedPath(conf)) {
-                    File confDir = new File(conf.trim());
-                    boolean ok;
-                    if (confDir.exists()) {
-                        ok = confDir.isDirectory() && confDir.canRead() && confDir.canWrite();
-                    } else {
-                        ok = confDir.mkdirs() && confDir.isDirectory() && confDir.canRead() && confDir.canWrite();
-                    }
-
-                    if (!ok) {
-                        mPathsParentPromptShown = true;
-                        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .edit()
-                            .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
-                            .apply();
-                        showReselectDialog(
-                            "Paths Folder Not Accessible",
-                            "Your config folder (conf) is not readable/writable:\n\n" + conf.trim() + "\n\n" +
-                                "This is commonly caused by Android storage restrictions.\n\n" +
-                                "Open Paths and re-select a parent folder (SAF) or use Internal storage.",
-                () -> startActivity(new Intent(this, PathsSimpleActivity.class))
-                        );
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
-            return;
-        }
-
-        // If we have no parent tree at all, or we lost persisted permission, the user must re-select.
-        boolean hasParentTree = parentTree != null && !parentTree.trim().isEmpty() && isContentUriString(parentTree);
-        boolean hasParentPerm = hasParentTree && hasPersistedReadPermission(parentTree) && hasPersistedWritePermission(parentTree);
-
-        // Conf dir is the critical path for saving/loading configs.
-        boolean confLooksSaf = ConfigStorage.isSafJoinedPath(conf);
-        boolean confPermOk = !confLooksSaf
-            || (hasPersistedReadPermissionForSafJoinedDir(conf) && hasPersistedWritePermissionForSafJoinedDir(conf));
-        boolean confDirOk = !confLooksSaf || canResolveSafJoinedDir(conf);
-
-        // If the conf subfolder is missing but the parent tree permission is
-        // valid, try to create it now. This fixes fresh installs where the
-        // filesystem mkdirs succeeded but DocumentFile.findFile() can't see
-        // the folder until it has been created via the SAF API.
-        if (confLooksSaf && !confDirOk && hasParentPerm) {
-            confDirOk = tryEnsureSafJoinedDir(conf);
-        }
-
-        if (!hasParentTree || !hasParentPerm || !confPermOk || !confDirOk) {
-            mPathsParentPromptShown = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
-                .apply();
-            String title = "Set Paths Parent Folder";
-            String message;
-            if (!hasParentTree) {
-                message = "Your paths are configured to use Android Storage Access Framework (SAF), but no parent folder is selected.\n\nPlease select the parent folder in Paths so configs and media can be accessed.";
-            } else if (!hasParentPerm) {
-                message = "Permission for your selected Paths parent folder is missing or does not include write access.\n\nPlease re-select the parent folder in Paths to grant access again.";
-            } else if (confLooksSaf && !confDirOk) {
-                message = "The config folder (conf) cannot be accessed under the selected parent folder.\n\nOpen Paths and tap Apply/Save to let the app create the needed folders, or create 'conf' under the app folder in your file manager, then re-open Paths.";
-            } else {
-                message = "Some SAF paths cannot be accessed due to missing permissions (or write permission).\n\nPlease open Paths and re-select the parent folder.";
-            }
-
-            showReselectDialog(
-                title,
-                message,
-                this::openPathsAndAutoPickSafParent
-            );
-        }
-    }
-
-    private static String defaultSubfolderForUaePathKey(String key) {
-        if (UaeOptionKeys.UAE_PATH_CONF_DIR.equals(key)) return "conf";
-        if (UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR.equals(key)) return "kickstarts";
-        if (UaeOptionKeys.UAE_PATH_FLOPPIES_DIR.equals(key)) return "disks";
-        if (UaeOptionKeys.UAE_PATH_CDROMS_DIR.equals(key)) return "cdroms";
-        if (UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR.equals(key)) return "harddrives";
-        if (UaeOptionKeys.UAE_PATH_LHA_DIR.equals(key)) return "lha";
-        if (UaeOptionKeys.UAE_PATH_WHDBOOT_DIR.equals(key)) return "whdboot";
-        if (UaeOptionKeys.UAE_PATH_SAVESTATES_DIR.equals(key)) return "savestates";
-        if (UaeOptionKeys.UAE_PATH_SCREENS_DIR.equals(key)) return "screenshots";
-        return null;
+        Runnable action = decision.action == BootstrapPathHealthEvaluator.ParentPromptAction.OPEN_PATHS_SIMPLE
+            ? () -> startActivity(new Intent(this, PathsSimpleActivity.class))
+            : this::openPathsAndAutoPickSafParent;
+        showReselectDialog(decision.title, decision.message, action);
     }
 
     private String resolveConfiguredPathForKeyWithParentFallback(SharedPreferences uaePrefs, String key) {
-        if (uaePrefs == null || key == null) return null;
-        String configured = uaePrefs.getString(key, null);
-        if (configured != null && !configured.trim().isEmpty()) return configured.trim();
-
-        String rel = defaultSubfolderForUaePathKey(key);
-        if (rel == null || rel.trim().isEmpty()) return null;
-
-        String parentTree = uaePrefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-        if (isContentUriString(parentTree)) {
-            String joined = joinSafTreeBase(parentTree, rel);
-            if (joined != null && !joined.trim().isEmpty()) return joined.trim();
-        }
-
-        String parentDir = uaePrefs.getString(UaeOptionKeys.UAE_PATH_PARENT_DIR, null);
-        if (parentDir != null && !parentDir.trim().isEmpty()) {
-            String p = parentDir.trim();
-            if (ConfigStorage.isSafJoinedPath(p)) {
-                ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(p);
-                if (sp != null && sp.treeUri != null && !sp.treeUri.trim().isEmpty()) {
-                    String joined = joinSafTreeBase(sp.treeUri, rel);
-                    if (joined != null && !joined.trim().isEmpty()) return joined.trim();
-                }
-            } else if (isContentUriString(p)) {
-                String joined = joinSafTreeBase(p, rel);
-                if (joined != null && !joined.trim().isEmpty()) return joined.trim();
-            } else {
-                return new File(p, rel).getAbsolutePath();
-            }
-        }
-
-        return null;
+        return BootstrapPathResolver.resolveConfiguredPathForKeyWithParentFallback(uaePrefs, key);
     }
 
     private boolean isSafPathReadable(String path) {
@@ -8173,85 +7912,88 @@ public class BootstrapActivity extends Activity {
         if (mRequiredPathsPromptShown) return;
 
         SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-        String floppies = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_FLOPPIES_DIR);
-        String lha = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_LHA_DIR);
-        String harddrives = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR);
-        String conf = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_CONF_DIR);
+        BootstrapPathHealthEvaluator.RequiredPathsDecision decision =
+            BootstrapPathHealthEvaluator.evaluateRequiredPathsPrompt(p, createPathHealthAccess());
+        if (decision == null) return;
 
-        java.util.ArrayList<String> missing = new java.util.ArrayList<>();
-        String firstAutoPick = null;
+        mRequiredPathsPromptShown = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, true)
+            .apply();
 
-        if (safeTrim(floppies).isEmpty()) {
-            missing.add("Floppies");
-            if (firstAutoPick == null) firstAutoPick = "floppies";
-        }
-        if (safeTrim(lha).isEmpty()) {
-            missing.add("LHA");
-            if (firstAutoPick == null) firstAutoPick = "lha";
-        }
-        if (safeTrim(harddrives).isEmpty()) {
-            missing.add("Harddrives");
-            if (firstAutoPick == null) firstAutoPick = "harddrives";
-        }
-
-        if (!missing.isEmpty()) {
-            mRequiredPathsPromptShown = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, true)
-                .apply();
-            final String autoPick = firstAutoPick == null ? "conf" : firstAutoPick;
-            showReselectDialog(
-                "Set Required Paths",
-                "Some required Paths are not set: " + android.text.TextUtils.join(", ", missing)
-                    + "\n\nPlease open Paths and set these folders.",
-                () -> openPathsAndAutoPick(autoPick)
-            );
-            return;
-        }
-
-        if (!isSafPathReadable(floppies) || !isSafPathReadable(lha) || !isSafPathReadable(harddrives) || !isSafPathWritable(conf)) {
-            mRequiredPathsPromptShown = true;
-            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, true)
-                .apply();
-            showReselectDialog(
-                "Paths Permission Required",
-                "One or more configured Paths no longer have valid SAF permissions.\n\n" +
-                    "Open Paths and re-select the parent folder (or affected folders) to restore access.",
-                this::openPathsAndAutoPickSafParent
-            );
-        }
+        Runnable action = decision.openSafParent
+            ? this::openPathsAndAutoPickSafParent
+            : () -> openPathsAndAutoPick(decision.autoPick == null ? "conf" : decision.autoPick);
+        showReselectDialog(decision.title, decision.message, action);
     }
 
     private String getPathsQuickstartFlagLine() {
         try {
             SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            String parentTree = p.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-            String parentDir = p.getString(UaeOptionKeys.UAE_PATH_PARENT_DIR, null);
-            String conf = p.getString(UaeOptionKeys.UAE_PATH_CONF_DIR, null);
-
-            boolean hasAnyParent = (parentTree != null && !parentTree.trim().isEmpty())
-                || (parentDir != null && !parentDir.trim().isEmpty());
-            if (!hasAnyParent) return "Paths: NOT SET";
-
-            // SAF mode
-            if (isContentUriString(parentTree) || ConfigStorage.isSafJoinedPath(conf)) {
-                if (ConfigStorage.isSafJoinedPath(conf)) {
-                    if (!hasPersistedReadPermissionForSafJoinedDir(conf)) return "Paths: permission required";
-                    if (!canResolveSafJoinedDir(conf)) return "Paths: conf folder missing";
-                }
-                if (isContentUriString(parentTree) && !hasPersistedReadPermission(parentTree)) {
-                    return "Paths: parent permission required";
-                }
-                return "Paths: SAF OK";
-            }
-
-            return "Paths: Local";
+            return BootstrapPathHealthEvaluator.computePathsQuickstartFlagLine(p, createPathHealthAccess());
         } catch (Throwable ignored) {
         }
         return "Paths: (unknown)";
+    }
+
+    private BootstrapPathHealthEvaluator.Access createPathHealthAccess() {
+        return new BootstrapPathHealthEvaluator.Access() {
+            @Override
+            public boolean isContentUriString(String value) {
+                return BootstrapActivity.this.isContentUriString(value);
+            }
+
+            @Override
+            public String safeTrim(String value) {
+                return BootstrapActivity.safeTrim(value);
+            }
+
+            @Override
+            public String resolveConfiguredPathForKeyWithParentFallback(SharedPreferences prefs, String key) {
+                return BootstrapActivity.this.resolveConfiguredPathForKeyWithParentFallback(prefs, key);
+            }
+
+            @Override
+            public boolean hasPersistedReadPermission(String uri) {
+                return BootstrapActivity.this.hasPersistedReadPermission(uri);
+            }
+
+            @Override
+            public boolean hasPersistedWritePermission(String uri) {
+                return BootstrapActivity.this.hasPersistedWritePermission(uri);
+            }
+
+            @Override
+            public boolean hasPersistedReadPermissionForSafJoinedDir(String joinedDir) {
+                return BootstrapActivity.this.hasPersistedReadPermissionForSafJoinedDir(joinedDir);
+            }
+
+            @Override
+            public boolean hasPersistedWritePermissionForSafJoinedDir(String joinedDir) {
+                return BootstrapActivity.this.hasPersistedWritePermissionForSafJoinedDir(joinedDir);
+            }
+
+            @Override
+            public boolean canResolveSafJoinedDir(String joinedDir) {
+                return BootstrapActivity.this.canResolveSafJoinedDir(joinedDir);
+            }
+
+            @Override
+            public boolean tryEnsureSafJoinedDir(String joinedDir) {
+                return BootstrapActivity.this.tryEnsureSafJoinedDir(joinedDir);
+            }
+
+            @Override
+            public boolean isSafPathReadable(String path) {
+                return BootstrapActivity.this.isSafPathReadable(path);
+            }
+
+            @Override
+            public boolean isSafPathWritable(String path) {
+                return BootstrapActivity.this.isSafPathWritable(path);
+            }
+        };
     }
 
     private void syncUiFromLauncherPrefs() {
@@ -9562,541 +9304,384 @@ public class BootstrapActivity extends Activity {
         return null;
     }
 
-    private static File fileFromPrimaryDocUri(Uri uri) {
-        String rel = extractPrimaryRelativePathFromDocUri(uri);
-        if (rel == null || rel.trim().isEmpty()) return null;
-        File root = android.os.Environment.getExternalStorageDirectory();
-        if (root == null) return null;
-        return new File(root, rel);
-    }
-
-    private static boolean copyFileDirect(File src, File dest) {
-        if (src == null || dest == null) return false;
-        if (!src.exists() || !src.isFile() || !src.canRead()) return false;
-        try {
-            java.io.File parent = dest.getParentFile();
-            if (parent != null && !parent.exists()) {
-                parent.mkdirs();
-            }
-            try (java.io.FileInputStream in = new java.io.FileInputStream(src);
-                 java.io.FileOutputStream out = new java.io.FileOutputStream(dest)) {
-                byte[] buf = new byte[64 * 1024];
-                int r;
-                while ((r = in.read(buf)) != -1) {
-                    out.write(buf, 0, r);
-                }
-                out.flush();
-            }
-            return dest.exists() && dest.isFile() && dest.length() > 0;
-        } catch (Throwable ignored) {
-        }
-        return false;
-    }
-
     private boolean importCueTrackFromFilesystemSibling(Uri cueUri, String relTrack, File dest) {
-        if (cueUri == null || relTrack == null || dest == null) return false;
-        try {
-            File cueFs = fileFromPrimaryDocUri(cueUri);
-            if (cueFs == null || !cueFs.exists() || !cueFs.isFile()) return false;
-            File cueDir = cueFs.getParentFile();
-            if (cueDir == null || !cueDir.exists() || !cueDir.isDirectory()) return false;
-
-            String rel = relTrack.trim().replace('\\', '/');
-            while (rel.startsWith("./")) rel = rel.substring(2);
-            while (rel.startsWith("/")) rel = rel.substring(1);
-            if (rel.isEmpty()) return false;
-
-            File src = new File(cueDir, rel);
-            if (!src.exists() || !src.isFile()) {
-                int slash = rel.lastIndexOf('/');
-                if (slash >= 0 && slash + 1 < rel.length()) {
-                    src = new File(cueDir, rel.substring(slash + 1));
-                }
-            }
-            if (!src.exists() || !src.isFile()) return false;
-
-            ensureDir(dest.getParentFile());
-            return copyFileDirect(src, dest);
-        } catch (Throwable ignored) {
-        }
-        return false;
+        return BootstrapCueCompanionImporter.importCueTrackFromFilesystemSibling(
+            cueCompanionImporterCallbacks(), cueUri, relTrack, dest);
     }
 
     private int importAllCueCompanionFilesFromFilesystemFolder(Uri cueUri, File cd0Dir) {
-        if (cueUri == null || cd0Dir == null) return 0;
-        try {
-            File cueFs = fileFromPrimaryDocUri(cueUri);
-            if (cueFs == null || !cueFs.exists() || !cueFs.isFile()) return 0;
-            File cueDir = cueFs.getParentFile();
-            if (cueDir == null || !cueDir.exists() || !cueDir.isDirectory()) return 0;
-
-            File[] files = cueDir.listFiles();
-            if (files == null || files.length == 0) return 0;
-
-            int copied = 0;
-            for (File f : files) {
-                if (f == null || !f.exists() || !f.isFile() || !f.canRead()) continue;
-                String name = f.getName();
-                if (name == null || name.trim().isEmpty()) continue;
-                String ext = lowerExt(name);
-                if (!isValidCdExtension(name) && !"bin".equals(ext)) continue;
-
-                File dest = new File(cd0Dir, safeFilename(name, "track.bin"));
-                ensureDir(dest.getParentFile());
-                if (copyFileDirect(f, dest)) copied++;
-            }
-            return copied;
-        } catch (Throwable ignored) {
-        }
-        return 0;
+        return BootstrapCueCompanionImporter.importAllCueCompanionFilesFromFilesystemFolder(
+            cueCompanionImporterCallbacks(), cueUri, cd0Dir);
     }
 
     private DocumentFile resolveDocumentFileFromSafJoinedPath(String joinedDir, String relativePath) {
-        if (joinedDir == null || relativePath == null) return null;
-        if (!ConfigStorage.isSafJoinedPath(joinedDir)) return null;
-        ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(joinedDir);
-        if (sp == null || sp.treeUri == null || sp.treeUri.trim().isEmpty()) return null;
-
-        try {
-            DocumentFile cur = DocumentFile.fromTreeUri(this, Uri.parse(sp.treeUri));
-            if (cur == null || !cur.exists() || !cur.isDirectory()) return null;
-
-            String baseRel = sp.relPath == null ? "" : sp.relPath.trim();
-            if (baseRel.startsWith("/")) baseRel = baseRel.substring(1);
-            if (baseRel.endsWith("/")) baseRel = baseRel.substring(0, baseRel.length() - 1);
-            if (!baseRel.isEmpty()) {
-                String[] parts = baseRel.split("/");
-                for (String part : parts) {
-                    if (part == null) continue;
-                    String seg = part.trim();
-                    if (seg.isEmpty()) continue;
-                    DocumentFile next = cur.findFile(seg);
-                    if (next == null || !next.exists()) return null;
-                    cur = next;
-                }
-            }
-
-            String rel = relativePath.trim().replace('\\', '/');
-            while (rel.startsWith("./")) rel = rel.substring(2);
-            while (rel.startsWith("/")) rel = rel.substring(1);
-            if (rel.isEmpty()) return cur;
-
-            String[] parts = rel.split("/");
-            for (String part : parts) {
-                if (part == null) continue;
-                String seg = part.trim();
-                if (seg.isEmpty()) continue;
-                DocumentFile next = cur.findFile(seg);
-                if (next == null || !next.exists()) return null;
-                cur = next;
-            }
-            return cur;
-        } catch (Throwable ignored) {
-        }
-        return null;
+        return BootstrapCueCompanionImporter.resolveDocumentFileFromSafJoinedPath(this, joinedDir, relativePath);
     }
 
     private boolean importCueTrackFromConfiguredCdroms(Uri cueUri, String relTrack, File dest) {
-        if (cueUri == null || relTrack == null || dest == null) return false;
-        try {
-            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            String cdromsPath = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_CDROMS_DIR);
-            if (cdromsPath == null || cdromsPath.trim().isEmpty()) {
-                String parentTree = p.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-                if (parentTree != null && !parentTree.trim().isEmpty() && isContentUriString(parentTree)) {
-                    cdromsPath = joinSafTreeBase(parentTree.trim(), "cdroms");
-                }
-            }
-            if (cdromsPath == null || cdromsPath.trim().isEmpty()) return false;
-            if (!ConfigStorage.isSafJoinedPath(cdromsPath)) return false;
-
-            String cueSubdir = extractCueSubdirUnderCdroms(cueUri);
-            String rel = relTrack.trim().replace('\\', '/');
-            while (rel.startsWith("./")) rel = rel.substring(2);
-            while (rel.startsWith("/")) rel = rel.substring(1);
-            if (rel.isEmpty()) return false;
-
-            String lookup = cueSubdir.isEmpty() ? rel : (cueSubdir + "/" + rel);
-            DocumentFile trackDf = resolveDocumentFileFromSafJoinedPath(cdromsPath, lookup);
-
-            if ((trackDf == null || !trackDf.isFile()) && rel.contains("/")) {
-                String base = rel.substring(rel.lastIndexOf('/') + 1);
-                String baseLookup = cueSubdir.isEmpty() ? base : (cueSubdir + "/" + base);
-                trackDf = resolveDocumentFileFromSafJoinedPath(cdromsPath, baseLookup);
-            }
-
-            if (trackDf == null || !trackDf.isFile()) {
-                String base = rel;
-                int slash = base.lastIndexOf('/');
-                if (slash >= 0 && slash + 1 < base.length()) {
-                    base = base.substring(slash + 1);
-                }
-
-                DocumentFile cueDir = null;
-                if (!cueSubdir.isEmpty()) {
-                    cueDir = resolveDocumentFileFromSafJoinedPath(cdromsPath, cueSubdir);
-                }
-                if (cueDir != null && cueDir.exists() && cueDir.isDirectory()) {
-                    trackDf = findFileByNameIgnoreCase(cueDir, base, 6);
-                }
-
-                if ((trackDf == null || !trackDf.isFile())) {
-                    DocumentFile cdRoot = resolveDocumentFileFromSafJoinedPath(cdromsPath, "");
-                    if (cdRoot != null && cdRoot.exists() && cdRoot.isDirectory()) {
-                        trackDf = findFileByNameIgnoreCase(cdRoot, base, 8);
-                    }
-                }
-            }
-
-            if (trackDf == null || !trackDf.isFile()) return false;
-            ensureDir(dest.getParentFile());
-            return copyDocumentFileTo(trackDf, dest);
-        } catch (Throwable ignored) {
-        }
-        return false;
+        return BootstrapCueCompanionImporter.importCueTrackFromConfiguredCdroms(
+            this,
+            cueCompanionImporterCallbacks(),
+            cueUri,
+            relTrack,
+            dest
+        );
     }
 
     private int importAllCueCompanionFilesFromConfiguredCdroms(Uri cueUri, File cd0Dir) {
-        if (cueUri == null || cd0Dir == null) return 0;
-        try {
-            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
-            String cdromsPath = resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_CDROMS_DIR);
-            if (cdromsPath == null || cdromsPath.trim().isEmpty()) {
-                String parentTree = p.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
-                if (parentTree != null && !parentTree.trim().isEmpty() && isContentUriString(parentTree)) {
-                    cdromsPath = joinSafTreeBase(parentTree.trim(), "cdroms");
-                }
-            }
-            if (cdromsPath == null || cdromsPath.trim().isEmpty()) return 0;
-            if (!ConfigStorage.isSafJoinedPath(cdromsPath)) return 0;
-
-            String cueSubdir = extractCueSubdirUnderCdroms(cueUri);
-            DocumentFile cueDir = resolveDocumentFileFromSafJoinedPath(cdromsPath, cueSubdir);
-            if (cueDir == null || !cueDir.exists() || !cueDir.isDirectory()) return 0;
-
-            DocumentFile[] kids = cueDir.listFiles();
-            if (kids == null || kids.length == 0) return 0;
-
-            int copied = 0;
-            for (DocumentFile df : kids) {
-                if (df == null || !df.exists() || !df.isFile()) continue;
-                String name = df.getName();
-                if (name == null || name.trim().isEmpty()) continue;
-                String ext = lowerExt(name);
-                if (!isValidCdExtension(name) && !"bin".equals(ext)) continue;
-
-                File dest = new File(cd0Dir, safeFilename(name, "track.bin"));
-                ensureDir(dest.getParentFile());
-                if (copyDocumentFileTo(df, dest)) {
-                    copied++;
-                }
-            }
-            return copied;
-        } catch (Throwable ignored) {
-        }
-        return 0;
+        return BootstrapCueCompanionImporter.importAllCueCompanionFilesFromConfiguredCdroms(
+            this,
+            cueCompanionImporterCallbacks(),
+            cueUri,
+            cd0Dir
+        );
     }
 
-    private boolean importMissingCueTracksFromCueFolder(Uri cueUri, File cd0Dir, List<String> missingTracks) {
-        if (cueUri == null || cd0Dir == null || missingTracks == null || missingTracks.isEmpty()) return false;
-        boolean copiedAny = false;
-        for (String rawTrack : missingTracks) {
-            try {
-                String relTrack = normalizeCueTrackRelativePath(rawTrack);
-                if (relTrack == null || relTrack.isEmpty()) continue;
-
-                Uri siblingUri = buildSiblingDocumentUriFromCue(cueUri, relTrack);
-                File dest = new File(cd0Dir, relTrack);
-                ensureDir(dest.getParentFile());
-                boolean copied = false;
-                if (siblingUri != null) {
-                    copied = importToFile(siblingUri, dest);
-                }
-                if (!copied) {
-                    copied = importCueTrackFromFilesystemSibling(cueUri, relTrack, dest);
-                }
-                if (!copied) {
-                    copied = importCueTrackFromConfiguredCdroms(cueUri, relTrack, dest);
-                }
-                if (copied) {
-                    copiedAny = true;
-                }
-            } catch (Throwable t) {
-                LogUtil.i(TAG, "Skipping sibling CUE track import for '" + rawTrack + "': " + t);
+    private BootstrapCueCompanionImporter.Callbacks cueCompanionImporterCallbacks() {
+        return new BootstrapCueCompanionImporter.Callbacks() {
+            @Override
+            public void ensureDir(File dir) {
+                BootstrapActivity.this.ensureDir(dir);
             }
-        }
-        return copiedAny;
+
+            @Override
+            public String lowerExt(String name) {
+                return BootstrapActivity.lowerExt(name);
+            }
+
+            @Override
+            public boolean isValidCdExtension(String name) {
+                return BootstrapActivity.isValidCdExtension(name);
+            }
+
+            @Override
+            public String safeFilename(String name, String fallback) {
+                return BootstrapActivity.safeFilename(name, fallback);
+            }
+
+            @Override
+            public boolean copyDocumentFileTo(DocumentFile src, File dest) {
+                return BootstrapActivity.this.copyDocumentFileTo(src, dest);
+            }
+
+            @Override
+            public SharedPreferences getPrefs() {
+                return BootstrapActivity.this.getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            }
+
+            @Override
+            public String resolveConfiguredPathForKeyWithParentFallback(SharedPreferences prefs, String key) {
+                return BootstrapActivity.this.resolveConfiguredPathForKeyWithParentFallback(prefs, key);
+            }
+
+            @Override
+            public boolean isContentUriString(String value) {
+                return BootstrapActivity.isContentUriString(value);
+            }
+
+            @Override
+            public String joinSafTreeBase(String treeBase, String relPath) {
+                return BootstrapActivity.joinSafTreeBase(treeBase, relPath);
+            }
+
+            @Override
+            public String extractCueSubdirUnderCdroms(Uri cueUri) {
+                return BootstrapActivity.this.extractCueSubdirUnderCdroms(cueUri);
+            }
+
+            @Override
+            public DocumentFile findFileByNameIgnoreCase(DocumentFile root, String targetName, int maxDepth) {
+                return BootstrapActivity.this.findFileByNameIgnoreCase(root, targetName, maxDepth);
+            }
+        };
     }
 
     private void handleCueImport(List<Uri> uris, java.util.Map<Uri, String> nameByUri,
                                  Uri cueUri, String cueLabel) {
-        File cd0Dir = getInternalCd0Dir();
-        deleteRecursive(cd0Dir);
-        ensureDir(cd0Dir);
+        BootstrapCueImportWorkflow.handleCueImport(
+            this,
+            uris,
+            nameByUri,
+            cueUri,
+            cueLabel,
+            cueImportWorkflowCallbacks()
+        );
+    }
 
-        File cueDest = null;
-        for (Uri u : uris) {
-            String name = nameByUri.get(u);
-            if (name == null || name.trim().isEmpty()) name = "track.bin";
-            String ext = lowerExt(name);
-            if (!isValidCdExtension(name) && !"bin".equals(ext)) continue;
-
-            File dest = new File(cd0Dir, safeFilename(name, "track.bin"));
-            if (!importToFile(u, dest)) {
-                LogUtil.i(TAG, "Failed to import CD companion file: " + name);
-                continue;
-            }
-            if (u.equals(cueUri)) cueDest = dest;
-        }
-
-        if (cueDest == null || !cueDest.exists() || cueDest.length() <= 0) {
-            Toast.makeText(this, "Failed to import CUE file", Toast.LENGTH_LONG).show();
-            return;
-        }
-
-        fixCueTrackFilenameCase(cueDest);
-
-        if (cueHasMissingTracks(cueDest)) {
-            List<String> tracks = parseCueTrackFilenames(cueDest);
-            List<String> missing = new ArrayList<>();
-            for (String track : tracks) {
-                if (track == null || track.trim().isEmpty()) continue;
-                if (!new File(cd0Dir, track).exists()) {
-                    missing.add(track);
-                }
+    private BootstrapCueImportWorkflow.Callbacks cueImportWorkflowCallbacks() {
+        return new BootstrapCueImportWorkflow.Callbacks() {
+            @Override
+            public File getInternalCd0Dir() {
+                return BootstrapActivity.this.getInternalCd0Dir();
             }
 
-            if (!missing.isEmpty()) {
-                importMissingCueTracksFromCueFolder(cueUri, cd0Dir, missing);
-                fixCueTrackFilenameCase(cueDest);
-                if (!cueHasMissingTracks(cueDest)) {
-                    applyCdSelectionPath(cueDest.getAbsolutePath(), cueLabel);
-                    Toast.makeText(this, "CUE imported with sibling BIN tracks", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-
-                int fsBulkCopied = importAllCueCompanionFilesFromFilesystemFolder(cueUri, cd0Dir);
-                if (fsBulkCopied > 0) {
-                    fixCueTrackFilenameCase(cueDest);
-                    if (!cueHasMissingTracks(cueDest)) {
-                        applyCdSelectionPath(cueDest.getAbsolutePath(), cueLabel);
-                        Toast.makeText(this, "CUE imported with files from CUE folder", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                }
-
-                int bulkCopied = importAllCueCompanionFilesFromConfiguredCdroms(cueUri, cd0Dir);
-                if (bulkCopied > 0) {
-                    fixCueTrackFilenameCase(cueDest);
-                    if (!cueHasMissingTracks(cueDest)) {
-                        applyCdSelectionPath(cueDest.getAbsolutePath(), cueLabel);
-                        Toast.makeText(this, "CUE imported with files from CUE folder", Toast.LENGTH_SHORT).show();
-                        return;
-                    }
-                }
-
-                Toast.makeText(this, "CUE is missing BIN tracks. Keep CUE and BIN files together.", Toast.LENGTH_LONG).show();
-                return;
+            @Override
+            public void deleteRecursive(File fileOrDir) {
+                BootstrapActivity.this.deleteRecursive(fileOrDir);
             }
-        }
-        applyCdSelectionPath(cueDest.getAbsolutePath(), cueLabel);
+
+            @Override
+            public void ensureDir(File dir) {
+                BootstrapActivity.this.ensureDir(dir);
+            }
+
+            @Override
+            public String lowerExt(String name) {
+                return BootstrapActivity.lowerExt(name);
+            }
+
+            @Override
+            public boolean isValidCdExtension(String name) {
+                return BootstrapActivity.isValidCdExtension(name);
+            }
+
+            @Override
+            public String safeFilename(String name, String fallback) {
+                return BootstrapActivity.safeFilename(name, fallback);
+            }
+
+            @Override
+            public boolean importToFile(Uri uri, File dest) {
+                return BootstrapActivity.this.importToFile(uri, dest);
+            }
+
+            @Override
+            public void logInfo(String message) {
+                LogUtil.i(TAG, message);
+            }
+
+            @Override
+            public void fixCueTrackFilenameCase(File cueDest) {
+                BootstrapActivity.this.fixCueTrackFilenameCase(cueDest);
+            }
+
+            @Override
+            public boolean cueHasMissingTracks(File cueDest) {
+                return BootstrapActivity.this.cueHasMissingTracks(cueDest);
+            }
+
+            @Override
+            public List<String> parseCueTrackFilenames(File cueDest) {
+                return BootstrapActivity.this.parseCueTrackFilenames(cueDest);
+            }
+
+            @Override
+            public String normalizeCueTrackRelativePath(String rawTrack) {
+                return BootstrapActivity.this.normalizeCueTrackRelativePath(rawTrack);
+            }
+
+            @Override
+            public Uri buildSiblingDocumentUriFromCue(Uri cueUri, String relTrack) {
+                return BootstrapActivity.this.buildSiblingDocumentUriFromCue(cueUri, relTrack);
+            }
+
+            @Override
+            public boolean importCueTrackFromFilesystemSibling(Uri cueUri, String relTrack, File dest) {
+                return BootstrapActivity.this.importCueTrackFromFilesystemSibling(cueUri, relTrack, dest);
+            }
+
+            @Override
+            public boolean importCueTrackFromConfiguredCdroms(Uri cueUri, String relTrack, File dest) {
+                return BootstrapActivity.this.importCueTrackFromConfiguredCdroms(cueUri, relTrack, dest);
+            }
+
+            @Override
+            public int importAllCueCompanionFilesFromFilesystemFolder(Uri cueUri, File cd0Dir) {
+                return BootstrapActivity.this.importAllCueCompanionFilesFromFilesystemFolder(cueUri, cd0Dir);
+            }
+
+            @Override
+            public int importAllCueCompanionFilesFromConfiguredCdroms(Uri cueUri, File cd0Dir) {
+                return BootstrapActivity.this.importAllCueCompanionFilesFromConfiguredCdroms(cueUri, cd0Dir);
+            }
+
+            @Override
+            public void applyCdSelectionPath(String cdPathOrUri, String sourceName) {
+                BootstrapActivity.this.applyCdSelectionPath(cdPathOrUri, sourceName);
+            }
+        };
     }
 
     private boolean handleCdImageImportResult(int requestCode, Intent data, int takeFlags, Uri uri) {
-        if (requestCode != REQ_IMPORT_CDIMAGE0) return false;
+        return BootstrapCdImageImportHandler.handle(
+            this,
+            requestCode,
+            REQ_IMPORT_CDIMAGE0,
+            data,
+            takeFlags,
+            uri,
+            cdImageImportCallbacks()
+        );
+    }
 
-        java.util.List<Uri> uris = new java.util.ArrayList<>();
-        java.util.Map<Uri, String> displayNameByUri = new java.util.HashMap<>();
-        if (data.getClipData() != null) {
-            android.content.ClipData cd = data.getClipData();
-            for (int i = 0; i < cd.getItemCount(); i++) {
-                Uri u = cd.getItemAt(i).getUri();
-                if (u != null) uris.add(u);
+    private BootstrapCdImageImportHandler.Callbacks cdImageImportCallbacks() {
+        return new BootstrapCdImageImportHandler.Callbacks() {
+            @Override
+            public void takeReadPermissionIfPossible(Uri uri, int takeFlags) {
+                BootstrapActivity.this.takeReadPermissionIfPossible(uri, takeFlags);
             }
-        } else if (uri != null) {
-            uris.add(uri);
-        }
 
-        if (uris.isEmpty()) {
-            Toast.makeText(this, "No CD files selected", Toast.LENGTH_SHORT).show();
-            return true;
-        }
-
-        Uri bestUri = null;
-        String bestLabel = null;
-        int bestPri = 999;
-
-        for (Uri u : uris) {
-            if (u == null) continue;
-            takeReadPermissionIfPossible(u, takeFlags);
-            String displayName = getDisplayName(u);
-            if (displayName == null || displayName.trim().isEmpty()) displayName = "cd.bin";
-            if (!isValidCdExtension(displayName)) {
-                continue;
+            @Override
+            public String getDisplayName(Uri uri) {
+                return BootstrapActivity.this.getDisplayName(uri);
             }
-            displayNameByUri.put(u, displayName);
-            int pri = cdMainPriority(lowerExt(displayName));
-            if (pri < bestPri) {
-                bestPri = pri;
-                bestUri = u;
-                bestLabel = displayName;
+
+            @Override
+            public boolean isValidCdExtension(String displayName) {
+                return BootstrapActivity.isValidCdExtension(displayName);
             }
-        }
 
-        if (bestUri == null) {
-            Toast.makeText(this, "Please select a CD image (.iso, .cue, .bin, or .chd)", Toast.LENGTH_LONG).show();
-            return true;
-        }
+            @Override
+            public void handleCueImport(List<Uri> uris, Map<Uri, String> displayNameByUri, Uri cueUri, String cueLabel) {
+                BootstrapActivity.this.handleCueImport(uris, displayNameByUri, cueUri, cueLabel);
+            }
 
-        if ("cue".equals(lowerExt(bestLabel))) {
-            handleCueImport(uris, displayNameByUri, bestUri, bestLabel);
-            return true;
-        }
+            @Override
+            public File getInternalCd0Dir() {
+                return BootstrapActivity.this.getInternalCd0Dir();
+            }
 
-        File cd0Dir = getInternalCd0Dir();
-        deleteRecursive(cd0Dir);
-        ensureDir(cd0Dir);
+            @Override
+            public void deleteRecursive(File fileOrDir) {
+                BootstrapActivity.this.deleteRecursive(fileOrDir);
+            }
 
-        String fallbackName = "cdimage0.bin";
-        String ext = lowerExt(bestLabel);
-        if (ext != null && !ext.trim().isEmpty()) {
-            fallbackName = "cdimage0." + ext;
-        }
-        File dest = new File(cd0Dir, safeFilename(bestLabel, fallbackName));
-        if (!importToFile(bestUri, dest)) {
-            Toast.makeText(this, "Failed to import CD image", Toast.LENGTH_SHORT).show();
-            return true;
-        }
+            @Override
+            public void ensureDir(File dir) {
+                BootstrapActivity.this.ensureDir(dir);
+            }
 
-        applyCdSelectionPath(dest.getAbsolutePath(), bestLabel);
-        return true;
+            @Override
+            public String safeFilename(String name, String fallback) {
+                return BootstrapActivity.safeFilename(name, fallback);
+            }
+
+            @Override
+            public boolean importToFile(Uri uri, File dest) {
+                return BootstrapActivity.this.importToFile(uri, dest);
+            }
+
+            @Override
+            public void applyCdSelectionPath(String cdPathOrUri, String sourceName) {
+                BootstrapActivity.this.applyCdSelectionPath(cdPathOrUri, sourceName);
+            }
+        };
     }
 
     private void handleFirstRunFolderResult(int resultCode, Uri uri) {
-        if (resultCode == RESULT_OK && uri != null) {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                    getContentResolver().takePersistableUriPermission(uri,
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                }
-
-                String treeUriStr = uri.toString();
-                SharedPreferences.Editor ed = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE).edit();
-                ed.putString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, treeUriStr);
-                ed.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, joinSafTreeBase(treeUriStr, "kickstarts"));
-                ed.putString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, joinSafTreeBase(treeUriStr, "disks"));
-                ed.putString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, joinSafTreeBase(treeUriStr, "harddrives"));
-                ed.putString(UaeOptionKeys.UAE_PATH_CONF_DIR, joinSafTreeBase(treeUriStr, "conf"));
-                ed.putString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, joinSafTreeBase(treeUriStr, "cdroms"));
-                ed.putString(UaeOptionKeys.UAE_PATH_ROMS_DIR, joinSafTreeBase(treeUriStr, "kickstarts"));
-                ed.putString(UaeOptionKeys.UAE_PATH_LHA_DIR, joinSafTreeBase(treeUriStr, "lha"));
-                ed.putString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, joinSafTreeBase(treeUriStr, "whdboot"));
-                ed.putString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, joinSafTreeBase(treeUriStr, "savestates"));
-                ed.apply();
-
-                Toast.makeText(this, "Storage access granted.", Toast.LENGTH_SHORT).show();
-                mPathsParentPromptShown = true;
-                mRequiredPathsPromptShown = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                    .edit()
-                    .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
-                    .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, true)
-                    .apply();
-            } catch (Throwable t) {
-                LogUtil.i(TAG, "First-run SAF permission failed", t);
-            }
+        if (!BootstrapFirstRunFolderHandler.handle(this, resultCode, uri)) {
+            return;
         }
+
+        mPathsParentPromptShown = true;
+        mRequiredPathsPromptShown = true;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putBoolean(PREF_PATHS_PARENT_PROMPT_SHOWN, true)
+            .putBoolean(PREF_REQUIRED_PATHS_PROMPT_SHOWN, true)
+            .apply();
     }
 
     private void handleWhdloadImportResult(Uri uri, Intent data) {
-        if (uri == null) return;
-        try {
-            takeReadPermissionIfPossible(uri, data.getFlags());
-        } catch (Throwable ignored) {
-        }
-
-        Intent i = new Intent(this, AmiberryActivity.class);
-        i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-        i.putExtra(AmiberryActivity.EXTRA_WHDLOAD_FILE, uri.toString());
-        i.putExtra(AmiberryActivity.EXTRA_ENABLE_LOGFILE, true);
-        startActivity(i);
-        finish();
+        BootstrapRomImportResultHandler.handleWhdloadImport(this, uri, data, romImportCallbacks());
     }
 
     private void handleKickstartImportResult(Uri uri) {
-        if (uri == null) return;
-        File romsDir = getInternalRomsDir();
-        ensureDir(romsDir);
-        File dest = guessDestFileForUri(uri, romsDir, INTERNAL_KICKSTART_PREFIX);
-        LogUtil.i(TAG, "Importing Kickstart from URI: " + uri + " -> " + dest.getAbsolutePath());
-        if (importToFile(uri, dest)) {
-            LogUtil.i(TAG, "Imported kickstart to: " + dest.getAbsolutePath());
-            mSelectedKick = dest;
-            String src = getDisplayName(uri);
-            mKickSourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putString(UaeOptionKeys.UAE_ROM_KICKSTART_FILE, dest.getAbsolutePath())
-                .putString(UaeOptionKeys.UAE_ROM_KICKSTART_LABEL, mKickSourceName)
-                .apply();
-
-            if (mPendingMapModelId != null && !mPendingMapModelId.trim().isEmpty() && !mPendingMapIsExt) {
-                String base = mPendingMapModelId.trim().toUpperCase(Locale.ROOT);
-                String key = PREF_KICK_MAP_PREFIX + base;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, dest.getAbsolutePath()).apply();
-                mPendingMapModelId = null;
-                mPendingMapIsExt = false;
-            } else {
-                String modelId = getSelectedQsModelId();
-                if (modelId != null && !modelId.trim().isEmpty()) {
-                    String key = PREF_KICK_MAP_PREFIX + modelId.trim().toUpperCase(Locale.ROOT);
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, dest.getAbsolutePath()).apply();
-                }
-            }
-
-            saveSourceNames();
-            refreshStatus();
-        } else {
-            Toast.makeText(this, "Kickstart import failed", Toast.LENGTH_SHORT).show();
+        BootstrapRomImportResultHandler.ImportOutcome outcome = BootstrapRomImportResultHandler.handleKickstartImport(
+            this,
+            uri,
+            INTERNAL_KICKSTART_PREFIX,
+            PREF_KICK_MAP_PREFIX,
+            mPendingMapModelId,
+            mPendingMapIsExt,
+            romImportCallbacks()
+        );
+        if (!outcome.success) {
+            return;
         }
+
+        mSelectedKick = outcome.selectedFile;
+        mKickSourceName = outcome.sourceName;
+        mPendingMapModelId = outcome.pendingMapModelId;
+        mPendingMapIsExt = outcome.pendingMapIsExt;
+        saveSourceNames();
+        refreshStatus();
     }
 
     private void handleExtRomImportResult(Uri uri) {
-        if (uri == null) return;
-        File romsDir = getInternalRomsDir();
-        ensureDir(romsDir);
-        File dest = guessDestFileForUri(uri, romsDir, INTERNAL_EXT_ROM_PREFIX);
-        LogUtil.i(TAG, "Importing Ext ROM from URI: " + uri + " -> " + dest.getAbsolutePath());
-        if (importToFile(uri, dest)) {
-            LogUtil.i(TAG, "Imported ext ROM to: " + dest.getAbsolutePath());
-            mSelectedExt = dest;
-            String src = getDisplayName(uri);
-            mExtSourceName = (src == null || src.trim().isEmpty()) ? uri.toString() : src;
-            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putString(UaeOptionKeys.UAE_ROM_EXT_FILE, dest.getAbsolutePath())
-                .putString(UaeOptionKeys.UAE_ROM_EXT_LABEL, mExtSourceName)
-                .apply();
+        BootstrapRomImportResultHandler.ImportOutcome outcome = BootstrapRomImportResultHandler.handleExtRomImport(
+            this,
+            uri,
+            INTERNAL_EXT_ROM_PREFIX,
+            PREF_EXT_MAP_PREFIX,
+            mPendingMapModelId,
+            mPendingMapIsExt,
+            romImportCallbacks()
+        );
+        if (!outcome.success) {
+            return;
+        }
 
-            if (mPendingMapModelId != null && !mPendingMapModelId.trim().isEmpty() && mPendingMapIsExt) {
-                String base = mPendingMapModelId.trim().toUpperCase(Locale.ROOT);
-                String key = PREF_EXT_MAP_PREFIX + base;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, dest.getAbsolutePath()).apply();
-                mPendingMapModelId = null;
-                mPendingMapIsExt = false;
-            } else {
-                String modelId = getSelectedQsModelId();
-                if (modelId != null && "CD32".equalsIgnoreCase(modelId.trim())) {
-                    String key = PREF_EXT_MAP_PREFIX + "CD32";
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, dest.getAbsolutePath()).apply();
-                }
+        mSelectedExt = outcome.selectedFile;
+        mExtSourceName = outcome.sourceName;
+        mPendingMapModelId = outcome.pendingMapModelId;
+        mPendingMapIsExt = outcome.pendingMapIsExt;
+        saveSourceNames();
+        refreshStatus();
+    }
+
+    private BootstrapRomImportResultHandler.Callbacks romImportCallbacks() {
+        return new BootstrapRomImportResultHandler.Callbacks() {
+            @Override
+            public void takeReadPermissionIfPossible(Uri uri, int takeFlags) {
+                BootstrapActivity.this.takeReadPermissionIfPossible(uri, takeFlags);
             }
 
-            saveSourceNames();
-            refreshStatus();
-        } else {
-            Toast.makeText(this, "Ext ROM import failed", Toast.LENGTH_SHORT).show();
-        }
+            @Override
+            public File getInternalRomsDir() {
+                return BootstrapActivity.this.getInternalRomsDir();
+            }
+
+            @Override
+            public void ensureDir(File dir) {
+                BootstrapActivity.this.ensureDir(dir);
+            }
+
+            @Override
+            public File guessDestFileForUri(Uri uri, File destDir, String fallbackPrefix) {
+                return BootstrapActivity.this.guessDestFileForUri(uri, destDir, fallbackPrefix);
+            }
+
+            @Override
+            public boolean importToFile(Uri uri, File dest) {
+                return BootstrapActivity.this.importToFile(uri, dest);
+            }
+
+            @Override
+            public String getDisplayName(Uri uri) {
+                return BootstrapActivity.this.getDisplayName(uri);
+            }
+
+            @Override
+            public SharedPreferences getUaePrefs() {
+                return BootstrapActivity.this.getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            }
+
+            @Override
+            public SharedPreferences getBootstrapPrefs() {
+                return BootstrapActivity.this.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            }
+
+            @Override
+            public String getSelectedQsModelId() {
+                return BootstrapActivity.this.getSelectedQsModelId();
+            }
+
+            @Override
+            public void logInfo(String message) {
+                LogUtil.i(TAG, message);
+            }
+        };
     }
 
     private boolean handleDfImportResultWithDefaultDisksDir(int requestCode, Uri uri) {
@@ -10109,36 +9694,14 @@ public class BootstrapActivity extends Activity {
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
-        if (requestCode == REQ_ADF_LIBRARY) {
-            if (resultCode == RESULT_OK && data != null) {
-                try {
-                    int dfIndex = Math.max(0, Math.min(3, data.getIntExtra(AdfLibraryActivity.EXTRA_TARGET_DF, 0)));
-                    String selectedPath = data.getStringExtra(AdfLibraryActivity.EXTRA_SELECTED_PATH);
-                    String selectedTitle = data.getStringExtra(AdfLibraryActivity.EXTRA_SELECTED_TITLE);
-                    String[] additionalPaths = data.getStringArrayExtra(AdfLibraryActivity.EXTRA_ADDITIONAL_PATHS);
-                    if (selectedPath != null && !selectedPath.trim().isEmpty()) {
-                        File selected = new File(selectedPath.trim());
-                        if (selected.exists() && selected.isFile()) {
-                            applyDfImportResultFromOnline(dfIndex, selected, selectedTitle, getInternalDisksDir());
-                            if (additionalPaths != null && additionalPaths.length > 0) {
-                                int nextSlot = dfIndex + 1;
-                                for (String extraPath : additionalPaths) {
-                                    if (nextSlot > 3) break;
-                                    if (extraPath == null || extraPath.trim().isEmpty()) continue;
-                                    File extra = new File(extraPath.trim());
-                                    if (!extra.exists() || !extra.isFile()) continue;
-                                    String extraLabel = extra.getName();
-                                    applyDfImportResultFromOnline(nextSlot, extra, extraLabel, getInternalDisksDir());
-                                    nextSlot++;
-                                }
-                            }
-                            Toast.makeText(this, "Inserted DF" + dfIndex + ": " + (selectedTitle == null ? selected.getName() : selectedTitle), Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                } catch (Throwable t) {
-                    Toast.makeText(this, "ADF library result failed: " + t.getMessage(), Toast.LENGTH_SHORT).show();
-                }
-            }
+        if (BootstrapAdfLibraryResultHandler.handle(
+            this,
+            requestCode,
+            resultCode,
+            data,
+            REQ_ADF_LIBRARY,
+            adfLibraryResultCallbacks()
+        )) {
             return;
         }
 
@@ -10150,52 +9713,70 @@ public class BootstrapActivity extends Activity {
             REQ_IMPORT_WHDLOAD,
             REQ_IMPORT_KICKSTART,
             REQ_IMPORT_EXT_ROM,
-            new BootstrapActivityResultRouter.Callbacks() {
-                @Override
-                public void onPrimaryUriResolved(Uri uri, int takeFlags) {
-                    takeReadPermissionIfPossible(uri, takeFlags);
-                }
-
-                @Override
-                public void handleFirstRunFolder(int resultCode, Uri uri) {
-                    handleFirstRunFolderResult(resultCode, uri);
-                }
-
-                @Override
-                public void handleWhdloadImport(Uri uri, Intent data) {
-                    handleWhdloadImportResult(uri, data);
-                }
-
-                @Override
-                public boolean handleDhDirImport(int requestCode, Uri uri) {
-                    return handleDhDirImportResult(requestCode, uri);
-                }
-
-                @Override
-                public boolean handleDhHdfImport(int requestCode, Intent data, Uri uri) {
-                    return handleDhHdfImportResult(requestCode, data, uri);
-                }
-
-                @Override
-                public void handleKickstartImport(Uri uri) {
-                    handleKickstartImportResult(uri);
-                }
-
-                @Override
-                public void handleExtRomImport(Uri uri) {
-                    handleExtRomImportResult(uri);
-                }
-
-                @Override
-                public boolean handleCdImageImport(int requestCode, Intent data, int takeFlags, Uri uri) {
-                    return handleCdImageImportResult(requestCode, data, takeFlags, uri);
-                }
-
-                @Override
-                public boolean handleDfImport(int requestCode, Uri uri) {
-                    return handleDfImportResultWithDefaultDisksDir(requestCode, uri);
-                }
-            }
+            activityResultRouterCallbacks()
         );
+    }
+
+    private BootstrapAdfLibraryResultHandler.Callbacks adfLibraryResultCallbacks() {
+        return new BootstrapAdfLibraryResultHandler.Callbacks() {
+            @Override
+            public void applyDfImportResultFromOnline(int dfIndex, File sourceFile, String sourceLabel, File targetDir) {
+                BootstrapActivity.this.applyDfImportResultFromOnline(dfIndex, sourceFile, sourceLabel, targetDir);
+            }
+
+            @Override
+            public File getInternalDisksDir() {
+                return BootstrapActivity.this.getInternalDisksDir();
+            }
+        };
+    }
+
+    private BootstrapActivityResultRouter.Callbacks activityResultRouterCallbacks() {
+        return new BootstrapActivityResultRouter.Callbacks() {
+            @Override
+            public void onPrimaryUriResolved(Uri uri, int takeFlags) {
+                takeReadPermissionIfPossible(uri, takeFlags);
+            }
+
+            @Override
+            public void handleFirstRunFolder(int resultCode, Uri uri) {
+                handleFirstRunFolderResult(resultCode, uri);
+            }
+
+            @Override
+            public void handleWhdloadImport(Uri uri, Intent data) {
+                handleWhdloadImportResult(uri, data);
+            }
+
+            @Override
+            public boolean handleDhDirImport(int requestCode, Uri uri) {
+                return handleDhDirImportResult(requestCode, uri);
+            }
+
+            @Override
+            public boolean handleDhHdfImport(int requestCode, Intent data, Uri uri) {
+                return handleDhHdfImportResult(requestCode, data, uri);
+            }
+
+            @Override
+            public void handleKickstartImport(Uri uri) {
+                handleKickstartImportResult(uri);
+            }
+
+            @Override
+            public void handleExtRomImport(Uri uri) {
+                handleExtRomImportResult(uri);
+            }
+
+            @Override
+            public boolean handleCdImageImport(int requestCode, Intent data, int takeFlags, Uri uri) {
+                return handleCdImageImportResult(requestCode, data, takeFlags, uri);
+            }
+
+            @Override
+            public boolean handleDfImport(int requestCode, Uri uri) {
+                return handleDfImportResultWithDefaultDisksDir(requestCode, uri);
+            }
+        };
     }
 }

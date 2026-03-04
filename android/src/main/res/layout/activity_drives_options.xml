@@ -41,6 +41,14 @@
             android:layout_marginTop="4dp"
             android:text="(not set)" />
 
+        <TextView
+            android:id="@+id/tvAgsMountPreview"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:text="Mount order preview: (select parent folder)"
+            android:textSize="12sp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -52,7 +60,7 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="Select AGS Folder" />
+                android:text="Select AGS Parent Folder" />
 
             <Button
                 android:id="@+id/btnAgsPathClear"
@@ -63,7 +71,14 @@
                 android:text="Clear" />
         </LinearLayout>
 
+        <LinearLayout
+            android:id="@+id/agsLegacySection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
         <TextView
+            android:id="@+id/tvCdHeader"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
@@ -426,6 +441,8 @@
                 android:text="Clear" />
         </LinearLayout>
 
+        </LinearLayout>
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -433,9 +450,17 @@
             android:orientation="horizontal">
 
             <Button
+                android:id="@+id/btnDrivesLaunchAgs"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Launch AGS" />
+
+            <Button
                 android:id="@+id/btnDrivesSave"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
                 android:layout_weight="1"
                 android:text="Save" />
 

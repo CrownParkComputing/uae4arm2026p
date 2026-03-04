@@ -71,6 +71,9 @@ public class DrivesOptionsActivity extends Activity {
     private CheckBox cbHdf1ReadOnly;
 
     private TextView tvCd0Path;
+    private TextView tvCdHeader;
+    private Button btnCd0Pick;
+    private Button btnCd0Clear;
     private Switch swCd32CdEnabled;
     private CheckBox cbMapCdDrives;
     private CheckBox cbCdTurbo;
@@ -78,6 +81,35 @@ public class DrivesOptionsActivity extends Activity {
     private TextView tvDosFsPath;
     private Switch swAgsAutoMountEnabled;
     private TextView tvAgsBasePath;
+    private TextView tvAgsMountPreview;
+    private android.view.View agsLegacySection;
+    private boolean mAgsOrderedProfileReady;
+
+    private static final class AgsOrderedMount {
+        final String sourceName;
+        final String dev;
+        final int unit;
+
+        AgsOrderedMount(String sourceName, String dev, int unit) {
+            this.sourceName = sourceName;
+            this.dev = dev;
+            this.unit = unit;
+        }
+    }
+
+    private static final AgsOrderedMount[] AGS_ORDERED_MOUNTS = new AgsOrderedMount[] {
+        new AgsOrderedMount("Workbench.hdf", "DH0", 0),
+        new AgsOrderedMount("Work.hdf", "DH1", 8),
+        new AgsOrderedMount("Music.hdf", "DH2", 11),
+        new AgsOrderedMount("Media.hdf", "DH3", 9),
+        new AgsOrderedMount("AGS_Drive.hdf", "DH4", 1),
+        new AgsOrderedMount("Games.hdf", "DH5", 2),
+        new AgsOrderedMount("Premium.hdf", "DH6", 12),
+        new AgsOrderedMount("Emulators.hdf", "DH7", 10),
+        new AgsOrderedMount("Emulators2.hdf", "DH8", 15),
+        new AgsOrderedMount("WHD_Demos.hdf", "DH9", 6),
+        new AgsOrderedMount("WHD_Games.hdf", "DH10", 14),
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,6 +146,7 @@ public class DrivesOptionsActivity extends Activity {
         cbHdf1ReadOnly = findViewById(R.id.cbHdf1ReadOnly);
 
         tvCd0Path = findViewById(R.id.tvCd0Path);
+        tvCdHeader = findViewById(R.id.tvCdHeader);
         swCd32CdEnabled = findViewById(R.id.swCd32CdEnabled);
         cbMapCdDrives = findViewById(R.id.cbMapCdDrives);
         cbCdTurbo = findViewById(R.id.cbCdTurbo);
@@ -121,6 +154,8 @@ public class DrivesOptionsActivity extends Activity {
         tvDosFsPath = findViewById(R.id.tvDosFsPath);
         swAgsAutoMountEnabled = findViewById(R.id.swAgsAutoMountEnabled);
         tvAgsBasePath = findViewById(R.id.tvAgsBasePath);
+        tvAgsMountPreview = findViewById(R.id.tvAgsMountPreview);
+        agsLegacySection = findViewById(R.id.agsLegacySection);
 
         Button btnDir0Pick = findViewById(R.id.btnDir0Pick);
         Button btnDir0Clear = findViewById(R.id.btnDir0Clear);
@@ -133,8 +168,8 @@ public class DrivesOptionsActivity extends Activity {
         Button btnHdf1Pick = findViewById(R.id.btnHdf1Pick);
         Button btnHdf1Clear = findViewById(R.id.btnHdf1Clear);
 
-        Button btnCd0Pick = findViewById(R.id.btnCd0Pick);
-        Button btnCd0Clear = findViewById(R.id.btnCd0Clear);
+        btnCd0Pick = findViewById(R.id.btnCd0Pick);
+        btnCd0Clear = findViewById(R.id.btnCd0Clear);
 
         Button btnDosFsPick = findViewById(R.id.btnDosFsPick);
         Button btnDosFsClear = findViewById(R.id.btnDosFsClear);
@@ -143,6 +178,7 @@ public class DrivesOptionsActivity extends Activity {
 
         Button btnSave = findViewById(R.id.btnDrivesSave);
         Button btnBack = findViewById(R.id.btnDrivesBack);
+        Button btnLaunchAgs = findViewById(R.id.btnDrivesLaunchAgs);
 
         btnDir0Pick.setOnClickListener(v -> pickDirectory(REQ_PICK_DIR0));
         btnDir1Pick.setOnClickListener(v -> pickDirectory(REQ_PICK_DIR1));
@@ -186,10 +222,36 @@ public class DrivesOptionsActivity extends Activity {
             refreshUiFromPrefs();
         });
 
+        swAgsAutoMountEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> applyAgsModeUi(isChecked));
+
         btnSave.setOnClickListener(v -> {
             saveToPrefs();
             finish();
         });
+
+        if (btnLaunchAgs != null) {
+            btnLaunchAgs.setOnClickListener(v -> {
+                saveToPrefs();
+
+                String agsBase = prefs.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, "");
+                if (agsBase == null || agsBase.trim().isEmpty()) {
+                    Toast.makeText(this, "Select AGS parent folder first", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                prefs.edit()
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, true)
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, true)
+                    .apply();
+
+                Intent i = new Intent(this, BootstrapActivity.class);
+                i.putExtra(BootstrapActivity.EXTRA_LAUNCH_AGS_FROM_SETUP, true);
+                i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(i);
+                finish();
+            });
+        }
+
         btnBack.setOnClickListener(v -> finish());
 
         refreshUiFromPrefs();
@@ -262,6 +324,163 @@ public class DrivesOptionsActivity extends Activity {
         String agsBase = prefs.getString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, "");
         swAgsAutoMountEnabled.setChecked(agsEnabled);
         tvAgsBasePath.setText(agsBase == null || agsBase.isEmpty() ? "(not set)" : agsBase);
+        updateAgsMountPreview(agsBase);
+
+        applyAgsModeUi(agsEnabled);
+    }
+
+    private void updateAgsMountPreview(String agsBase) {
+        if (tvAgsMountPreview == null) return;
+        if (agsBase == null || agsBase.trim().isEmpty()) {
+            tvAgsMountPreview.setText("Mount order preview: (select parent folder)");
+            return;
+        }
+
+        String base = agsBase.trim();
+        StringBuilder sb = new StringBuilder();
+        sb.append("Mount order preview\n");
+
+        int found = 0;
+        for (AgsOrderedMount item : AGS_ORDERED_MOUNTS) {
+            String hit = findAgsNamedChild(base, item.sourceName, false, 4);
+            if (hit != null && !hit.trim().isEmpty()) {
+                found++;
+                sb.append("✓ ")
+                    .append(item.dev)
+                    .append(" <= ")
+                    .append(item.sourceName)
+                    .append(" (uae")
+                    .append(item.unit)
+                    .append(")\n");
+            } else {
+                sb.append("• ")
+                    .append(item.dev)
+                    .append(" <= ")
+                    .append(item.sourceName)
+                    .append(" (missing)\n");
+            }
+        }
+
+        String shared = findAgsNamedChild(base, "SHARED", true, 4);
+        if (shared == null || shared.trim().isEmpty()) {
+            shared = findAgsNamedChild(base, "SHARD", true, 4);
+        }
+        boolean hasShared = shared != null && !shared.trim().isEmpty();
+        if (shared != null && !shared.trim().isEmpty()) {
+            sb.append("✓ Shared <= SHARED");
+        } else {
+            sb.append("• Shared <= SHARED (missing)");
+        }
+
+        mAgsOrderedProfileReady = (found >= AGS_ORDERED_MOUNTS.length && hasShared);
+        if (mAgsOrderedProfileReady) {
+            sb.append("\nAGS profile ready: A1200 + JIT + RTG + 2MB chip");
+        }
+
+        sb.append("\nFound ").append(found).append("/").append(AGS_ORDERED_MOUNTS.length).append(" HDF files");
+        tvAgsMountPreview.setText(sb.toString());
+    }
+
+    private String findAgsNamedChild(String basePathOrTreeUri, String childName, boolean directory, int maxDepth) {
+        if (basePathOrTreeUri == null || basePathOrTreeUri.trim().isEmpty()) return null;
+        if (childName == null || childName.trim().isEmpty()) return null;
+        if (maxDepth < 0) return null;
+
+        String base = basePathOrTreeUri.trim();
+        String target = childName.trim();
+
+        if (base.startsWith("content://")) {
+            try {
+                DocumentFile root = DocumentFile.fromTreeUri(this, Uri.parse(base));
+                return findSafNamedRecursive(root, target, directory, 0, maxDepth);
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+
+        return findFileNamedRecursive(new File(base), target, directory, 0, maxDepth);
+    }
+
+    private String findFileNamedRecursive(File dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.exists() || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        File[] kids = dir.listFiles();
+        if (kids == null) return null;
+
+        for (File kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getAbsolutePath();
+                if (!directory && kid.isFile()) return kid.getAbsolutePath();
+            }
+        }
+
+        for (File kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findFileNamedRecursive(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        return null;
+    }
+
+    private String findSafNamedRecursive(DocumentFile dir, String targetName, boolean directory, int depth, int maxDepth) {
+        if (dir == null || !dir.isDirectory()) return null;
+        if (depth > maxDepth) return null;
+
+        DocumentFile[] kids;
+        try {
+            kids = dir.listFiles();
+        } catch (Throwable ignored) {
+            return null;
+        }
+        if (kids == null) return null;
+
+        for (DocumentFile kid : kids) {
+            if (kid == null) continue;
+            String name = kid.getName();
+            if (name == null) continue;
+            if (name.equalsIgnoreCase(targetName)) {
+                if (directory && kid.isDirectory()) return kid.getUri().toString();
+                if (!directory && kid.isFile()) return kid.getUri().toString();
+            }
+        }
+
+        for (DocumentFile kid : kids) {
+            if (kid == null || !kid.isDirectory()) continue;
+            String hit = findSafNamedRecursive(kid, targetName, directory, depth + 1, maxDepth);
+            if (hit != null && !hit.trim().isEmpty()) return hit;
+        }
+
+        return null;
+    }
+
+    private void applyAgsModeUi(boolean agsEnabled) {
+        if (agsEnabled) {
+            tvCd0Path.setText("(disabled by AGS auto-mount)");
+        }
+
+        if (agsLegacySection != null) {
+            agsLegacySection.setVisibility(agsEnabled ? android.view.View.GONE : android.view.View.VISIBLE);
+        }
+
+        int visibility = android.view.View.GONE;
+        if (tvCdHeader != null) tvCdHeader.setVisibility(visibility);
+        if (tvCd0Path != null) tvCd0Path.setVisibility(visibility);
+        if (btnCd0Pick != null) {
+            btnCd0Pick.setEnabled(!agsEnabled);
+            btnCd0Pick.setVisibility(visibility);
+        }
+        if (btnCd0Clear != null) {
+            btnCd0Clear.setEnabled(!agsEnabled);
+            btnCd0Clear.setVisibility(visibility);
+        }
+        if (swCd32CdEnabled != null) swCd32CdEnabled.setVisibility(visibility);
+        if (cbMapCdDrives != null) cbMapCdDrives.setVisibility(visibility);
+        if (cbCdTurbo != null) cbCdTurbo.setVisibility(visibility);
     }
 
     private void saveToPrefs() {
@@ -287,13 +506,46 @@ public class DrivesOptionsActivity extends Activity {
         e.putString(UaeOptionKeys.UAE_DRIVE_HDF1_DEVNAME, safeText(etHdf1Dev, "DH1"));
         e.putBoolean(UaeOptionKeys.UAE_DRIVE_HDF1_READONLY, cbHdf1ReadOnly.isChecked());
 
-        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, swCd32CdEnabled.isChecked());
-        e.putBoolean(UaeOptionKeys.UAE_DRIVE_MAP_CD_DRIVES, cbMapCdDrives.isChecked());
-        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD_TURBO, cbCdTurbo.isChecked());
+        boolean agsEnabled = swAgsAutoMountEnabled.isChecked();
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD32CD_ENABLED, !agsEnabled && swCd32CdEnabled.isChecked());
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_MAP_CD_DRIVES, !agsEnabled && cbMapCdDrives.isChecked());
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_CD_TURBO, !agsEnabled && cbCdTurbo.isChecked());
 
-        e.putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, swAgsAutoMountEnabled.isChecked());
+        e.putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, agsEnabled);
+        if (agsEnabled) {
+            e.remove(UaeOptionKeys.UAE_DRIVE_CD_IMAGE0_PATH);
+            if (mAgsOrderedProfileReady) {
+                applyAgsBaselineProfile(e);
+            }
+        }
 
         e.apply();
+    }
+
+    private void applyAgsBaselineProfile(SharedPreferences.Editor e) {
+        if (e == null) return;
+
+        e.putString("qs_model", "A1200");
+        e.putInt("qs_config", 0);
+
+        e.putString(UaeOptionKeys.UAE_CHIPSET_COMPATIBLE, "A1200");
+        e.putString(UaeOptionKeys.UAE_CHIPSET, "aga");
+
+        e.putString(UaeOptionKeys.UAE_CPU_MODEL, "68020");
+        e.putBoolean(UaeOptionKeys.UAE_CPU_24BIT_ADDRESSING, false);
+        e.putBoolean(UaeOptionKeys.UAE_CPU_COMPATIBLE, false);
+        e.putString(UaeOptionKeys.UAE_CPU_SPEED, "max");
+        e.putString(UaeOptionKeys.UAE_CYCLE_EXACT, "false");
+
+        e.putBoolean(UaeOptionKeys.UAE_JIT_ENABLED, true);
+        e.putInt(UaeOptionKeys.UAE_CACHESIZE, 16384);
+
+        e.putInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, 2);
+        e.putInt(UaeOptionKeys.UAE_MEM_FASTMEM_BYTES, 0);
+        e.putInt(UaeOptionKeys.UAE_MEM_Z3MEM_SIZE_MB, 512);
+
+        e.putInt(UaeOptionKeys.UAE_GFXCARD_SIZE_MB, 32);
+        e.putString(UaeOptionKeys.UAE_GFXCARD_TYPE, "ZorroIII");
     }
 
     private void clearAgsAutoMount() {
@@ -500,7 +752,10 @@ public class DrivesOptionsActivity extends Activity {
                 }
             } else if (requestCode == REQ_PICK_AGS_ROOT) {
                 String path = tryResolveToFilesystemPath(uri);
-                prefs.edit().putString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, path != null ? path : uri.toString()).apply();
+                prefs.edit()
+                    .putString(UaeOptionKeys.UAE_DRIVE_AGS_BASE_PATH, path != null ? path : uri.toString())
+                    .putBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, true)
+                    .apply();
             } else if (requestCode == REQ_PICK_DIR0 || requestCode == REQ_PICK_DIR1) {
                 // Directory mounts (filesystem2) currently require native directory support.
                 // We still store the tree URI so we can enable proper SAF-backed directory access later.

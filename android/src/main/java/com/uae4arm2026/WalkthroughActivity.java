@@ -681,49 +681,55 @@ public class WalkthroughActivity extends Activity {
 	private void saveParentPathAndAutoFill(Uri parentTree) {
 		SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 		SharedPreferences.Editor e = prefs.edit();
+		String previousParentTree = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
 
 		e.putString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, parentTree.toString());
 		String base = parentTree.toString() + "::/";
 
 		e.putString(UaeOptionKeys.UAE_PATH_PARENT_DIR, base);
 
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_CONF_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_CONF_DIR, base + "conf/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null))) {
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_CONF_DIR, "conf/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_ROMS_DIR, "roms/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, "floppies/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, "harddrives/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_CDROMS_DIR, "cdroms/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, "savestates/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_SCREENS_DIR, "screenshots/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_LHA_DIR, "lha/");
+		updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, "whdboot/");
+
+		String currentKickstarts = prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
+		if (looksLikeWrongKickstartsUnderFloppies(currentKickstarts)) {
 			e.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, base + "kickstarts/");
 		} else {
-			String currentKickstarts = prefs.getString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, null);
-			if (looksLikeWrongKickstartsUnderFloppies(currentKickstarts)) {
-				e.putString(UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, base + "kickstarts/");
-			}
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_ROMS_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_ROMS_DIR, base + "roms/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, base + "floppies/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR, base + "harddrives/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_CDROMS_DIR, base + "cdroms/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_SAVESTATES_DIR, base + "savestates/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_SCREENS_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_SCREENS_DIR, base + "screenshots/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_LHA_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_LHA_DIR, base + "lha/");
-		}
-		if (isBlank(prefs.getString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, null))) {
-			e.putString(UaeOptionKeys.UAE_PATH_WHDBOOT_DIR, base + "whdboot/");
+			updatePathForParentChange(e, prefs, previousParentTree, base, UaeOptionKeys.UAE_PATH_KICKSTARTS_DIR, "kickstarts/");
 		}
 
 		e.apply();
+	}
+
+	private static void updatePathForParentChange(
+		SharedPreferences.Editor editor,
+		SharedPreferences prefs,
+		String previousParentTree,
+		String newBase,
+		String pathKey,
+		String defaultSuffix
+	) {
+		editor.putString(pathKey, newBase + defaultSuffix);
+	}
+
+	private static boolean shouldRebaseToNewParent(String currentPath, String previousParentTree) {
+		if (isBlank(currentPath)) return true;
+		if (isBlank(previousParentTree)) return true;
+
+		String current = currentPath.trim();
+		String oldTree = previousParentTree.trim();
+		String oldBase = oldTree + "::/";
+
+		return current.equals(oldTree)
+			|| current.equals(oldTree + "::")
+			|| current.startsWith(oldBase);
 	}
 
 	private static boolean looksLikeWrongKickstartsUnderFloppies(String value) {
@@ -799,6 +805,7 @@ public class WalkthroughActivity extends Activity {
 			.setTitle(R.string.walkthrough_skip_title)
 			.setMessage(R.string.walkthrough_skip_message)
 			.setPositiveButton(R.string.walkthrough_skip_yes, (d, w) -> {
+				setWalkthroughDisabled(this, true);
 				startBootstrap();
 				finish();
 			})

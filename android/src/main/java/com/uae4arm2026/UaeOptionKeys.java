@@ -230,6 +230,7 @@ public final class UaeOptionKeys {
     // AGS UAE auto-mount profile (maps a known AGS_UAE folder layout to hardfile2/filesystem2 args).
     public static final String UAE_DRIVE_AGS_AUTOMOUNT_ENABLED = "uae_drive_ags_automount_enabled"; // boolean
     public static final String UAE_DRIVE_AGS_BASE_PATH = "uae_drive_ags_base_path"; // string folder path or SAF tree URI
+    public static final String UAE_DRIVE_AGS_LAUNCH_ONCE = "uae_drive_ags_launch_once"; // boolean one-shot launch gate set by AGS setup launch
 
     // Optional filesystem module for non-RDB DOS\x hardfiles (e.g. FastFileSystem).
     // Stored as an absolute path in app-internal storage so the core can load it.
@@ -278,6 +279,7 @@ public final class UaeOptionKeys {
     public static final String UAE_INPUT_AUTOFIRE = "uae_input_autofire"; // int/boolean (input_autofire_button_X?) - handled via -s autofire=yes/no usually or specific rate
     // Amiberry typically uses "autofire" boolean or "input_autofire_speed"
     public static final String UAE_INPUT_AUTOFIRE_ENABLED = "uae_input_autofire_enabled"; // boolean
+    public static final String UAE_INPUT_CONTROLLER_MOUSE_REMAP = "uae_input_controller_mouse_remap"; // boolean
 
     // External gamepad button mapping (Android UI -> joyportX_amiberry_custom_none_*).
     public static final String UAE_INPUT_MAP_BTN_A = "uae_input_map_btn_a";

@@ -24,6 +24,7 @@ public class InputOptionsActivity extends Activity {
     private SeekBar mMouseSpeed;
     private TextView mMouseSpeedInfo;
     private CheckBox mAutofire;
+    private CheckBox mControllerMouseRemap;
 
     private SharedPreferences prefs() {
         return getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
@@ -65,7 +66,8 @@ public class InputOptionsActivity extends Activity {
         return p.contains(UaeOptionKeys.UAE_INPUT_PORT0_MODE)
             || p.contains(UaeOptionKeys.UAE_INPUT_PORT1_MODE)
             || p.contains(UaeOptionKeys.UAE_INPUT_MOUSE_SPEED)
-            || p.contains(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED);
+            || p.contains(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED)
+            || p.contains(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP);
     }
 
     private void setControlsEnabled(boolean enabled) {
@@ -97,6 +99,9 @@ public class InputOptionsActivity extends Activity {
         boolean autofire = p.getBoolean(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED, false);
         mAutofire.setChecked(autofire);
 
+        boolean remapMouse = p.getBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, false);
+        mControllerMouseRemap.setChecked(remapMouse);
+
         setControlsEnabled(!usePreset);
     }
 
@@ -109,6 +114,7 @@ public class InputOptionsActivity extends Activity {
             e.remove(UaeOptionKeys.UAE_INPUT_PORT1_MODE);
             e.remove(UaeOptionKeys.UAE_INPUT_MOUSE_SPEED);
             e.remove(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED);
+            e.remove(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP);
             e.apply();
             return;
         }
@@ -127,6 +133,7 @@ public class InputOptionsActivity extends Activity {
 
         e.putInt(UaeOptionKeys.UAE_INPUT_MOUSE_SPEED, mMouseSpeed.getProgress());
         e.putBoolean(UaeOptionKeys.UAE_INPUT_AUTOFIRE_ENABLED, mAutofire.isChecked());
+        e.putBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, mControllerMouseRemap.isChecked());
 
         e.apply();
     }
@@ -143,6 +150,7 @@ public class InputOptionsActivity extends Activity {
         mMouseSpeed = findViewById(R.id.seekMouseSpeed);
         mMouseSpeedInfo = findViewById(R.id.txtMouseSpeedInfo);
         mAutofire = findViewById(R.id.chkAutofire);
+        mControllerMouseRemap = findViewById(R.id.chkControllerMouseRemap);
 
         mControllerSource.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, CONTROLLER_SOURCE_LABELS));
         ((ArrayAdapter<?>) mControllerSource.getAdapter()).setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);

@@ -194,6 +194,14 @@
           android:hardwareAccelerated="true" />
 
         <activity
+          android:name="com.uae4arm2026.LhaLibraryActivity"
+          android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+          android:exported="false"
+          android:screenOrientation="landscape"
+          android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+          android:hardwareAccelerated="true" />
+
+        <activity
           android:name="com.uae4arm2026.InputMappingActivity"
           android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
           android:exported="false"
