@@ -6,6 +6,8 @@ import android.net.Uri;
 import android.os.Build;
 import android.widget.Toast;
 
+import androidx.documentfile.provider.DocumentFile;
+
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -36,11 +38,54 @@ final class BootstrapFirstRunFolderHandler {
             }
             editor.apply();
 
+            // Create sub-folders so they exist before the emulator tries to use them.
+            ensureDefaultSubfolders(activity, uri);
+
             Toast.makeText(activity, "Storage access granted.", Toast.LENGTH_SHORT).show();
             return true;
         } catch (Throwable t) {
             LogUtil.i("BootstrapFirstRunFolderHandler", "First-run SAF permission failed", t);
             return false;
+        }
+    }
+
+    /**
+     * Creates the default sub-folders under the selected parent tree so they are ready to use.
+     */
+    private static void ensureDefaultSubfolders(BootstrapActivity activity, Uri parentUri) {
+        try {
+            DocumentFile parent = DocumentFile.fromTreeUri(activity, parentUri);
+            if (parent == null || !parent.exists()) return;
+            // Collect unique subfolder names from the path mappings.
+            java.util.Set<String> subfolders = new java.util.LinkedHashSet<>(pathMappings().values());
+            // Also include screenshots which is not in pathMappings but used by the app.
+            subfolders.add("screenshots");
+            for (String subfolder : subfolders) {
+                ensureSubfolderExists(parent, subfolder);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static void ensureSubfolderExists(DocumentFile parent, String subfolder) {
+        if (parent == null || subfolder == null || subfolder.trim().isEmpty()) return;
+        try {
+            DocumentFile existing = parent.findFile(subfolder);
+            if (existing != null && existing.exists() && existing.isDirectory()) {
+                return; // Already exists as a directory.
+            }
+            if (existing != null && existing.exists()) {
+                // A file (not a directory) blocks the creation; log and skip.
+                LogUtil.i("BootstrapFirstRunFolderHandler",
+                    "Cannot create subfolder '" + subfolder + "': a file with that name already exists");
+                return;
+            }
+            DocumentFile created = parent.createDirectory(subfolder);
+            if (created == null) {
+                LogUtil.i("BootstrapFirstRunFolderHandler",
+                    "Failed to create subfolder: " + subfolder);
+            }
+        } catch (Throwable ignored) {
         }
     }
 

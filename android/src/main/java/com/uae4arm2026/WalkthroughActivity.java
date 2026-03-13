@@ -25,6 +25,7 @@ import android.widget.Toast;
 import androidx.documentfile.provider.DocumentFile;
 
 import java.io.File;
+import java.util.List;
 
 public class WalkthroughActivity extends Activity {
 
@@ -136,9 +137,19 @@ public class WalkthroughActivity extends Activity {
 	private void goToPage(int page) {
 		if (page < 0) page = 0;
 
-		if (mCurrentPage == PAGE_PATHS && page > PAGE_PATHS && !hasParentTreeConfigured()) {
-			Toast.makeText(this, "Please select a parent folder first", Toast.LENGTH_SHORT).show();
-			return;
+		if (mCurrentPage == PAGE_PATHS && page > PAGE_PATHS) {
+			// Require a valid parent folder with confirmed SAF permissions before advancing.
+			// mParentTreeUri is reset to null in showPathsPage() when permissions are missing,
+			// so checking it here is sufficient without re-fetching from SharedPreferences.
+			if (mParentTreeUri == null || mParentTreeUri.trim().isEmpty()) {
+				Toast.makeText(this, "Please select a parent folder first", Toast.LENGTH_SHORT).show();
+				return;
+			}
+			if (mParentTreeUri.trim().startsWith("content://") && !hasValidSafPermission(mParentTreeUri)) {
+				Toast.makeText(this, "Storage permission missing. Please re-select the parent folder.", Toast.LENGTH_LONG).show();
+				pickSafParentFolder();
+				return;
+			}
 		}
 
 		if (page >= PAGE_COUNT) {
@@ -465,6 +476,14 @@ public class WalkthroughActivity extends Activity {
 		SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
 		mParentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
 
+		// If the stored parent URI is a SAF content URI but permissions are no longer valid
+		// (e.g., after an app update or reinstall that revoked them), clear it so the user
+		// is prompted to re-select and re-grant access.
+		if (mParentTreeUri != null && mParentTreeUri.trim().startsWith("content://")
+				&& !hasValidSafPermission(mParentTreeUri)) {
+			mParentTreeUri = null;
+		}
+
 		mPathsStatusText = new TextView(this);
 		mPathsStatusText.setTextSize(12);
 		updatePathsStatusText();
@@ -486,7 +505,7 @@ public class WalkthroughActivity extends Activity {
 		if (mParentTreeUri == null || mParentTreeUri.trim().isEmpty()) {
 			new Handler(Looper.getMainLooper()).post(() -> new AlertDialog.Builder(this)
 				.setTitle("Parent folder required")
-				.setMessage("Please select a parent folder first. Default folders will be created inside it.")
+				.setMessage("Please select a parent folder. The app needs read/write access to it and all sub-folders.")
 				.setPositiveButton("Select Folder", (d, w) -> pickSafParentFolder())
 				.setNegativeButton("Later", null)
 				.show());
@@ -637,6 +656,30 @@ public class WalkthroughActivity extends Activity {
 			}
 		} catch (Throwable ignored) {
 		}
+	}
+
+	/**
+	 * Returns true if there is a valid persisted read+write URI permission for the given
+	 * content URI. Used to detect revoked SAF permissions (e.g. after an app update).
+	 */
+	private boolean hasValidSafPermission(String uriString) {
+		if (uriString == null) return false;
+		String s = uriString.trim();
+		if (s.isEmpty() || !s.startsWith("content://")) return false;
+		try {
+			Uri u = Uri.parse(s);
+			List<android.content.UriPermission> perms = getContentResolver().getPersistedUriPermissions();
+			if (perms == null) return false;
+			for (android.content.UriPermission p : perms) {
+				if (p == null) continue;
+				Uri pu = p.getUri();
+				if (pu != null && pu.equals(u) && p.isReadPermission() && p.isWritePermission()) {
+					return true;
+				}
+			}
+		} catch (Throwable ignored) {
+		}
+		return false;
 	}
 
 	@Override
