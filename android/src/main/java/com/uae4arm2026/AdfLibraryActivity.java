@@ -32,6 +32,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -96,6 +97,7 @@ public class AdfLibraryActivity extends Activity {
         String title;
         String summary;
         String coverUrl;
+        String contentUri; // non-null when discovered via SAF (content:// URI)
 
         LibraryEntry(File file, String fileName, String title) {
             this.file = file;
@@ -103,6 +105,12 @@ public class AdfLibraryActivity extends Activity {
             this.title = title;
             this.summary = "";
             this.coverUrl = null;
+        }
+
+        /** Return the path/URI to pass to the emulator. Prefers SAF content URI when available. */
+        String getEmulatorPath() {
+            if (contentUri != null && !contentUri.trim().isEmpty()) return contentUri;
+            return file != null ? file.getAbsolutePath() : null;
         }
     }
 
@@ -245,15 +253,19 @@ public class AdfLibraryActivity extends Activity {
         for (LibraryEntry entry : group) {
             if (entry == null || entry.file == null) continue;
             if (entry.file.equals(firstDisk.file)) continue;
-            additional.add(entry.file.getAbsolutePath());
+            additional.add(entry.getEmulatorPath());
         }
 
         Intent out = new Intent();
         out.putExtra(EXTRA_TARGET_DF, targetDf);
-        out.putExtra(EXTRA_SELECTED_PATH, firstDisk.file.getAbsolutePath());
+        out.putExtra(EXTRA_SELECTED_PATH, firstDisk.getEmulatorPath());
         out.putExtra(EXTRA_SELECTED_TITLE, firstDisk.title);
         out.putExtra(EXTRA_ADDITIONAL_PATHS, additional.toArray(new String[0]));
-        out.setData(Uri.fromFile(firstDisk.file));
+        if (firstDisk.contentUri != null) {
+            out.setData(Uri.parse(firstDisk.contentUri));
+        } else {
+            out.setData(Uri.fromFile(firstDisk.file));
+        }
         setResult(RESULT_OK, out);
         finish();
     }
@@ -614,6 +626,15 @@ public class AdfLibraryActivity extends Activity {
             } catch (Throwable ignored) {
             }
 
+            // If raw File scan found nothing, try scanning via SAF DocumentFile.
+            if (loaded.isEmpty()) {
+                try {
+                    collectDiskEntriesViaSaf(loaded);
+                } catch (Throwable t) {
+                    AppLog.append(AdfLibraryActivity.this, "SAF library scan failed: " + t.getMessage());
+                }
+            }
+
             runOnUiThread(() -> {
                 allEntries.clear();
                 allEntries.addAll(loaded);
@@ -640,9 +661,12 @@ public class AdfLibraryActivity extends Activity {
             String parentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
 
             File fsRoot = resolvePrimaryFilesystemFloppiesDir(floppiesUri, parentTreeUri);
-            if (fsRoot != null && fsRoot.exists() && fsRoot.isDirectory()) {
+            if (fsRoot != null && fsRoot.exists() && fsRoot.isDirectory()
+                    && isDirectoryTrulyAccessible(fsRoot)) {
                 lastSyncNote = "Library root: " + fsRoot.getAbsolutePath();
                 return fsRoot;
+            } else if (fsRoot != null) {
+                AppLog.append(this, "Filesystem floppies dir not accessible (scoped storage): " + fsRoot.getAbsolutePath());
             }
 
             File base = AppPaths.getBaseDir(this);
@@ -659,6 +683,23 @@ public class AdfLibraryActivity extends Activity {
             } catch (Throwable ignored) {
                 return null;
             }
+        }
+    }
+
+    /**
+     * Verify a directory is truly accessible via raw File APIs — not blocked
+     * by Android scoped storage.  On Android 11+ the directory may physically
+     * exist but listFiles() returns null and writes throw EPERM.
+     */
+    private boolean isDirectoryTrulyAccessible(File dir) {
+        if (dir == null) return false;
+        try {
+            // listFiles() returns null when the app lacks read access
+            if (dir.listFiles() == null) return false;
+            // canWrite() is false when scoped storage blocks write access
+            return dir.canWrite();
+        } catch (Throwable ignored) {
+            return false;
         }
     }
 
@@ -681,6 +722,68 @@ public class AdfLibraryActivity extends Activity {
             String cached = getCachedIgdbTitle(name);
             String title = (cached == null || cached.trim().isEmpty()) ? derivePrettyTitle(name) : cached.trim();
             LibraryEntry entry = new LibraryEntry(f, name, title);
+            String cachedSummary = getCachedIgdbSummary(name);
+            String cachedCover = getCachedIgdbCoverUrl(name);
+            if (cachedSummary != null) entry.summary = cachedSummary;
+            if (cachedCover != null) entry.coverUrl = cachedCover;
+            out.add(entry);
+        }
+    }
+
+    /**
+     * Scan the user's configured floppies folder(s) via SAF DocumentFile.
+     * Used as a fallback when raw File-based scanning fails due to scoped storage.
+     * Creates LibraryEntry objects with contentUri set so the emulator receives
+     * a content:// URI it can open via SafFileBridge.
+     */
+    private void collectDiskEntriesViaSaf(ArrayList<LibraryEntry> out) {
+        SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+        String floppiesUri = prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null);
+        String parentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
+
+        ArrayList<DocumentFile> roots = resolveFloppyRoots(floppiesUri, parentTreeUri);
+        int before = out.size();
+        for (DocumentFile root : roots) {
+            if (root == null || !root.exists() || !root.isDirectory()) continue;
+            collectDiskEntriesFromDocumentFile(root, out);
+        }
+        int found = out.size() - before;
+        AppLog.append(this, "SAF library scan found " + found + " entries from " + roots.size() + " root(s)");
+        if (found > 0) {
+            lastSyncNote = "Library: " + found + " disks (via SAF)";
+        }
+    }
+
+    private void collectDiskEntriesFromDocumentFile(DocumentFile dir, ArrayList<LibraryEntry> out) {
+        if (dir == null || out == null || !dir.exists() || !dir.isDirectory()) return;
+        DocumentFile[] children;
+        try {
+            children = dir.listFiles();
+        } catch (Throwable t) {
+            return;
+        }
+        if (children == null) return;
+        for (DocumentFile child : children) {
+            if (child == null) continue;
+            if (child.isDirectory()) {
+                collectDiskEntriesFromDocumentFile(child, out);
+                continue;
+            }
+            String name = child.getName();
+            if (name == null || name.trim().isEmpty()) continue;
+            if (!isSupportedLibraryDiskFile(name)) continue;
+            if (isLibraryHidden(name)) continue;
+
+            Uri docUri = child.getUri();
+            if (docUri == null) continue;
+
+            // Create a synthetic File for display/grouping; the real path for the
+            // emulator is the content URI stored in contentUri.
+            File syntheticFile = new File("/saf-library/" + name);
+            String cached = getCachedIgdbTitle(name);
+            String title = (cached == null || cached.trim().isEmpty()) ? derivePrettyTitle(name) : cached.trim();
+            LibraryEntry entry = new LibraryEntry(syntheticFile, name, title);
+            entry.contentUri = docUri.toString();
             String cachedSummary = getCachedIgdbSummary(name);
             String cachedCover = getCachedIgdbCoverUrl(name);
             if (cachedSummary != null) entry.summary = cachedSummary;
@@ -1705,30 +1808,115 @@ public class AdfLibraryActivity extends Activity {
             fileName = sanitizeFileName(item.title) + ".zip";
         }
 
-        File disks = resolveLibraryDiskRoot();
-        if (disks == null) {
-            throw new IllegalStateException("Unable to resolve library folder");
-        }
-        ensureDir(disks);
-        File out = uniqueFile(new File(disks, fileName));
-
+        // Buffer the entire download into memory first
+        byte[] data;
         InputStream in = conn.getInputStream();
-        try (FileOutputStream fos = new FileOutputStream(out)) {
-            byte[] buf = new byte[64 * 1024];
-            int r;
-            while ((r = in.read(buf)) != -1) {
-                fos.write(buf, 0, r);
-            }
-            fos.flush();
+        try {
+            data = readAllBytes(in);
         } finally {
             try { in.close(); } catch (Throwable ignored) {}
             conn.disconnect();
         }
 
+        // Try writing to the SAF floppies folder first (the user's chosen external folder)
+        File internalCopy = writeToSafFloppiesThenSyncInternal(fileName, data);
+        if (internalCopy != null && internalCopy.exists() && internalCopy.length() > 0) {
+            return internalCopy;
+        }
+
+        // Fallback: write directly to internal disks dir (raw File I/O always works here)
+        AppLog.append(this, "SAF floppies write unavailable, saving to internal storage only");
+        File internalDisks = new File(AppPaths.getBaseDir(this), "disks");
+        ensureDir(internalDisks);
+        File out = uniqueFile(new File(internalDisks, fileName));
+        writeBytes(out, data);
+
         if (!out.exists() || out.length() <= 0) {
             throw new IllegalStateException("Downloaded file empty");
         }
         return out;
+    }
+
+    /**
+     * Write a downloaded file to the SAF floppies folder, then sync a copy to
+     * internal storage so the emulator can read it via raw File path.
+     * Returns the internal File copy, or null if SAF write failed.
+     */
+    private File writeToSafFloppiesThenSyncInternal(String fileName, byte[] data) {
+        try {
+            SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String floppiesUri = prefs.getString(UaeOptionKeys.UAE_PATH_FLOPPIES_DIR, null);
+            String parentTreeUri = prefs.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
+
+            DocumentFile safDir = resolveFloppiesRoot(floppiesUri, parentTreeUri);
+            if (safDir == null || !safDir.exists() || !safDir.isDirectory()) {
+                AppLog.append(this, "SAF floppies root not resolved for download");
+                return null;
+            }
+
+            // Determine MIME type for createFile
+            String mime = "application/octet-stream";
+            String lower = fileName.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(".adf")) mime = "application/x-amiga-disk-format";
+            else if (lower.endsWith(".zip")) mime = "application/zip";
+
+            // Avoid overwriting: check if file already exists
+            String baseName = fileName;
+            DocumentFile existing = safDir.findFile(baseName);
+            if (existing != null && existing.exists()) {
+                int dot = baseName.lastIndexOf('.');
+                String stem = dot > 0 ? baseName.substring(0, dot) : baseName;
+                String ext = dot > 0 ? baseName.substring(dot) : "";
+                for (int i = 2; i < 999; i++) {
+                    String candidate = stem + "_" + i + ext;
+                    DocumentFile check = safDir.findFile(candidate);
+                    if (check == null || !check.exists()) {
+                        baseName = candidate;
+                        break;
+                    }
+                }
+            }
+
+            DocumentFile created = safDir.createFile(mime, baseName);
+            if (created == null) {
+                AppLog.append(this, "SAF createFile returned null for: " + baseName);
+                return null;
+            }
+
+            // Write data to SAF
+            try (OutputStream os = getContentResolver().openOutputStream(created.getUri())) {
+                if (os == null) {
+                    AppLog.append(this, "SAF openOutputStream returned null");
+                    return null;
+                }
+                os.write(data);
+                os.flush();
+            }
+            AppLog.append(this, "Downloaded to SAF floppies: " + baseName + " (" + data.length + " bytes)");
+
+            // Sync a copy to internal disks dir so the emulator can read it
+            File internalDisks = new File(AppPaths.getBaseDir(this), "disks");
+            ensureDir(internalDisks);
+            File internalTarget = uniqueFile(new File(internalDisks, baseName));
+            if (copyDocumentToFile(created.getUri(), internalTarget)) {
+                AppLog.append(this, "Synced SAF download to internal: " + internalTarget.getName());
+                return internalTarget;
+            }
+
+            // Direct fallback: write bytes to internal
+            writeBytes(internalTarget, data);
+            return internalTarget;
+        } catch (Throwable t) {
+            AppLog.append(this, "SAF floppies download failed: " + t.getMessage());
+            return null;
+        }
+    }
+
+    private void writeBytes(File target, byte[] data) throws Exception {
+        try (FileOutputStream fos = new FileOutputStream(target)) {
+            fos.write(data);
+            fos.flush();
+        }
     }
 
     private String fetchTosecRemoteFileName(TosecResult item) throws Exception {

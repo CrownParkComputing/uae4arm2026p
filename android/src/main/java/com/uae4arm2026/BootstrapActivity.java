@@ -9020,6 +9020,54 @@ public class BootstrapActivity extends Activity {
         refreshStatus();
     }
 
+    /**
+     * Apply a floppy drive selection from a SAF content:// URI (used when the ADF
+     * library discovers disks via DocumentFile on scoped-storage devices).
+     */
+    private void applyDfSelectionFromContentUri(int dfIndex, String contentUri, String sourceName) {
+        if (contentUri == null || contentUri.trim().isEmpty()) return;
+        String uri = contentUri.trim();
+
+        if (dfIndex == 0) {
+            if (mLaunchedFromEmulatorMenu) {
+                mForceHotSwapOnNextResumeAction = true;
+            }
+            mSelectedDf0 = null;
+            mSelectedDf0Path = uri;
+            mDf0SourceName = (sourceName != null && !sourceName.trim().isEmpty()) ? sourceName.trim() : uri;
+        } else if (dfIndex == 1) {
+            mSelectedDf1 = null;
+            mSelectedDf1Path = uri;
+            mDf1SourceName = (sourceName != null && !sourceName.trim().isEmpty()) ? sourceName.trim() : uri;
+            mDf1Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF1, true).apply();
+        } else if (dfIndex == 2) {
+            mSelectedDf2 = null;
+            mSelectedDf2Path = uri;
+            mDf2SourceName = (sourceName != null && !sourceName.trim().isEmpty()) ? sourceName.trim() : uri;
+            mDf2Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF2, true).apply();
+        } else if (dfIndex == 3) {
+            mSelectedDf3 = null;
+            mSelectedDf3Path = uri;
+            mDf3SourceName = (sourceName != null && !sourceName.trim().isEmpty()) ? sourceName.trim() : uri;
+            mDf3Added = true;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_DF3, true).apply();
+        }
+
+        String key = uaeDfPathKeyForIndex(dfIndex);
+        if (key != null) {
+            getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(key, uri)
+                .commit();
+        }
+
+        saveSourceNames();
+        refreshStatus();
+        maybeReopenMediaSwapperAfterPicker();
+    }
+
     private String getOnlineAdfCacheKey(String fileName) {
         if (fileName == null) return null;
         String k = fileName.trim().toLowerCase(Locale.ROOT);
@@ -9963,6 +10011,11 @@ public class BootstrapActivity extends Activity {
             @Override
             public void applyDfImportResultFromOnline(int dfIndex, File sourceFile, String sourceLabel, File targetDir) {
                 BootstrapActivity.this.applyDfImportResultFromOnline(dfIndex, sourceFile, sourceLabel, targetDir);
+            }
+
+            @Override
+            public void applyDfSelectionFromContentUri(int dfIndex, String contentUri, String sourceLabel) {
+                BootstrapActivity.this.applyDfSelectionFromContentUri(dfIndex, contentUri, sourceLabel);
             }
 
             @Override

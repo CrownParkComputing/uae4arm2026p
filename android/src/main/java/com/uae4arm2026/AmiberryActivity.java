@@ -157,6 +157,21 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
+    /**
+     * On Android 11+ with scoped storage, File.exists()/canRead() may return true
+     * for paths outside app-private storage even though native fopen() gets EPERM.
+     * This method does a real byte-read to verify the file is truly accessible.
+     */
+    private static boolean probeRawFileReadable(String path) {
+        if (path == null || path.trim().isEmpty()) return false;
+        try (FileInputStream fis = new FileInputStream(path)) {
+            fis.read();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     private static boolean sLoggedVkbdProvisionFailure = false;
     private static boolean sLoggedVkbdInterceptorFailure = false;
     private static boolean sLoggedVkbdTouchFailure = false;
@@ -2330,9 +2345,14 @@ public class AmiberryActivity extends SDLActivity {
             if (prefKick != null && !prefKick.trim().isEmpty()) {
                 File f = new File(prefKick.trim());
                 if (f.exists() && f.canRead()) {
-                    mKickstartRomFile = f.getAbsolutePath();
-                    logI("Using Kickstart from prefs: " + mKickstartRomFile);
-                    return;
+                    // On Android 11+ scoped storage, canRead() can lie for external paths.
+                    // Do a real byte-read probe to confirm native code will be able to open the file.
+                    if (probeRawFileReadable(f.getAbsolutePath())) {
+                        mKickstartRomFile = f.getAbsolutePath();
+                        logI("Using Kickstart from prefs: " + mKickstartRomFile);
+                        return;
+                    }
+                    Log.w(TAG, "Kickstart in prefs passes canRead() but real read probe failed (scoped storage?): " + prefKick);
                 }
                 Log.w(TAG, "Kickstart in prefs is missing or unreadable: " + prefKick);
             }
@@ -2343,7 +2363,7 @@ public class AmiberryActivity extends SDLActivity {
         File externalKick = getExternalKickstartFile();
 
         if (externalKick.exists()) {
-            if (externalKick.canRead()) {
+            if (externalKick.canRead() && probeRawFileReadable(externalKick.getAbsolutePath())) {
                 mKickstartRomFile = externalKick.getAbsolutePath();
                 logI("Using external Kickstart: " + mKickstartRomFile);
                 return;
@@ -3840,13 +3860,15 @@ public class AmiberryActivity extends SDLActivity {
             int insetLeft = insets.getSystemWindowInsetLeft();
             int insetTop = insets.getSystemWindowInsetTop();
             int insetRight = insets.getSystemWindowInsetRight();
-            int insetBottom = insets.getSystemWindowInsetBottom();
+            // Bottom: only honour display-cutout, never the navigation bar
+            // (we run in immersive-sticky mode so the nav bar is hidden).
+            int insetBottom = 0;
 
             if (Build.VERSION.SDK_INT >= 28 && insets.getDisplayCutout() != null) {
                 insetLeft = Math.max(insetLeft, insets.getDisplayCutout().getSafeInsetLeft());
                 insetTop = Math.max(insetTop, insets.getDisplayCutout().getSafeInsetTop());
                 insetRight = Math.max(insetRight, insets.getDisplayCutout().getSafeInsetRight());
-                insetBottom = Math.max(insetBottom, insets.getDisplayCutout().getSafeInsetBottom());
+                insetBottom = insets.getDisplayCutout().getSafeInsetBottom();
             }
 
             mEmulatorLayer.setPadding(insetLeft, insetTop, insetRight, insetBottom);
@@ -3866,6 +3888,7 @@ public class AmiberryActivity extends SDLActivity {
         decor.setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_LAYOUT_STABLE
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
@@ -4097,7 +4120,7 @@ public class AmiberryActivity extends SDLActivity {
                 logI("Using forced DF0 disk image from intent (SAF): " + mDf0DiskImagePath);
             } else {
                 File f = new File(s);
-                if (f.exists() && f.canRead()) {
+                if (f.exists() && f.canRead() && probeRawFileReadable(f.getAbsolutePath())) {
                     mDf0DiskImagePath = f.getAbsolutePath();
                     logI("Using forced DF0 disk image from intent: " + mDf0DiskImagePath + " (" + describeDiskPath(mDf0DiskImagePath) + ")");
                 } else {
@@ -4116,7 +4139,7 @@ public class AmiberryActivity extends SDLActivity {
                 logI("Using forced DF1 disk image from intent (SAF): " + mDf1DiskImagePath);
             } else {
                 File f = new File(s);
-                if (f.exists() && f.canRead()) {
+                if (f.exists() && f.canRead() && probeRawFileReadable(f.getAbsolutePath())) {
                     mDf1DiskImagePath = f.getAbsolutePath();
                     logI("Using forced DF1 disk image from intent: " + mDf1DiskImagePath);
                 } else {
@@ -4132,7 +4155,7 @@ public class AmiberryActivity extends SDLActivity {
                 logI("Using forced DF2 disk image from intent: (eject)");
             } else {
                 File f = new File(s);
-                if (f.exists() && f.canRead()) {
+                if (f.exists() && f.canRead() && probeRawFileReadable(f.getAbsolutePath())) {
                     mDf2DiskImagePath = f.getAbsolutePath();
                     logI("Using forced DF2 disk image from intent: " + mDf2DiskImagePath);
                 } else {
@@ -4148,7 +4171,7 @@ public class AmiberryActivity extends SDLActivity {
                 logI("Using forced DF3 disk image from intent: (eject)");
             } else {
                 File f = new File(s);
-                if (f.exists() && f.canRead()) {
+                if (f.exists() && f.canRead() && probeRawFileReadable(f.getAbsolutePath())) {
                     mDf3DiskImagePath = f.getAbsolutePath();
                     logI("Using forced DF3 disk image from intent: " + mDf3DiskImagePath);
                 } else {
@@ -5677,12 +5700,12 @@ public class AmiberryActivity extends SDLActivity {
         for (String rel : new String[]{EXTERNAL_DF0_REL_1, EXTERNAL_DF0_REL_2}) {
             File external = getExternalDf0DiskFile(rel);
             if (external.exists()) {
-                if (external.canRead()) {
+                if (external.canRead() && probeRawFileReadable(external.getAbsolutePath())) {
                     mDf0DiskImagePath = external.getAbsolutePath();
                     logI("Using external DF0 disk image: " + mDf0DiskImagePath);
                     return;
                 }
-                Log.w(TAG, "External DF0 exists but is not readable: " + external.getAbsolutePath());
+                Log.w(TAG, "External DF0 exists but is not readable (scoped storage?): " + external.getAbsolutePath());
             }
         }
     }
@@ -5777,9 +5800,11 @@ public class AmiberryActivity extends SDLActivity {
                         }
                     } else {
                         File f = new File(s);
-                        if (f.exists() && f.canRead() && f.isFile()) {
+                        if (f.exists() && f.canRead() && f.isFile() && probeRawFileReadable(f.getAbsolutePath())) {
                             mDf0DiskImagePath = f.getAbsolutePath();
                             logI("Using DF0 disk image from prefs: " + mDf0DiskImagePath);
+                        } else if (f.exists()) {
+                            Log.w(TAG, "DF0 in prefs exists but real read failed (scoped storage?): " + s);
                         }
                     }
                 }
@@ -5799,9 +5824,11 @@ public class AmiberryActivity extends SDLActivity {
                         }
                     } else {
                         File f = new File(s);
-                        if (f.exists() && f.canRead() && f.isFile()) {
+                        if (f.exists() && f.canRead() && f.isFile() && probeRawFileReadable(f.getAbsolutePath())) {
                             mDf1DiskImagePath = f.getAbsolutePath();
                             logI("Using DF1 disk image from prefs: " + mDf1DiskImagePath);
+                        } else if (f.exists()) {
+                            Log.w(TAG, "DF1 in prefs exists but real read failed (scoped storage?): " + s);
                         }
                     }
                 }
@@ -5815,9 +5842,11 @@ public class AmiberryActivity extends SDLActivity {
                 if (df2 != null && !df2.trim().isEmpty()) {
                     String s = df2.trim();
                     File f = new File(s);
-                    if (f.exists() && f.canRead() && f.isFile()) {
+                    if (f.exists() && f.canRead() && f.isFile() && probeRawFileReadable(f.getAbsolutePath())) {
                         mDf2DiskImagePath = f.getAbsolutePath();
                         logI("Using DF2 disk image from prefs: " + mDf2DiskImagePath);
+                    } else if (f.exists()) {
+                        Log.w(TAG, "DF2 in prefs exists but real read failed (scoped storage?): " + s);
                     }
                 }
             } catch (Throwable ignored) {
@@ -5830,9 +5859,11 @@ public class AmiberryActivity extends SDLActivity {
                 if (df3 != null && !df3.trim().isEmpty()) {
                     String s = df3.trim();
                     File f = new File(s);
-                    if (f.exists() && f.canRead() && f.isFile()) {
+                    if (f.exists() && f.canRead() && f.isFile() && probeRawFileReadable(f.getAbsolutePath())) {
                         mDf3DiskImagePath = f.getAbsolutePath();
                         logI("Using DF3 disk image from prefs: " + mDf3DiskImagePath);
+                    } else if (f.exists()) {
+                        Log.w(TAG, "DF3 in prefs exists but real read failed (scoped storage?): " + s);
                     }
                 }
             } catch (Throwable ignored) {

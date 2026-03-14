@@ -76,6 +76,9 @@ final class BootstrapRomImportResultHandler {
         Intent launch = new Intent(activity, AmiberryActivity.class);
         launch.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
         launch.putExtra(AmiberryActivity.EXTRA_WHDLOAD_FILE, uri.toString());
+        // WHDLoad games require AGA chipset — default to Amiga 1200.
+        launch.putExtra(AmiberryActivity.EXTRA_QS_MODEL, "A1200");
+        launch.putExtra(AmiberryActivity.EXTRA_MACHINE_PRESET, "A1200");
         launch.putExtra(AmiberryActivity.EXTRA_ENABLE_LOGFILE, true);
         activity.startActivity(launch);
         activity.finish();
