@@ -243,6 +243,7 @@ public class BootstrapActivity extends Activity {
     private TextView mQsConfigFull;
     private Button mBtnKickMap;
     private View mEasySetupContainer;
+    private View mEasyOptionsRow;
     private View mEasyZ3Layout;
     private CheckBox mEasyJit;
     private CheckBox mEasyRtg;
@@ -251,10 +252,16 @@ public class BootstrapActivity extends Activity {
     private Spinner mEasyZ3;
     private boolean mBindingEasySetup;
 
-    private static final int[] EASY_CHIP_VALUES = {2, 4, 8, 16};
-    private static final String[] EASY_CHIP_LABELS = {"1 MB", "2 MB", "4 MB", "8 MB"};
-    private static final int[] EASY_FAST_BYTES = {1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
-    private static final String[] EASY_FAST_LABELS = {"1 MB", "2 MB", "4 MB", "8 MB"};
+    // Game cover art
+    private android.widget.ImageView mImgGameCover;
+    private final java.util.HashMap<String, android.graphics.Bitmap> mCoverCache = new java.util.HashMap<>();
+    private final java.util.HashSet<String> mCoverLoading = new java.util.HashSet<>();
+    private static final String PREF_IGDB_COVER_URL_CACHE_PREFIX = "igdb_cover_url_cache_";
+
+    private static final int[] EASY_CHIP_VALUES = {1, 2, 4, 8, 16};
+    private static final String[] EASY_CHIP_LABELS = {"512 KB", "1 MB", "2 MB", "4 MB", "8 MB"};
+    private static final int[] EASY_FAST_BYTES = {512 * 1024, 1 * 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 8 * 1024 * 1024};
+    private static final String[] EASY_FAST_LABELS = {"512 KB", "1 MB", "2 MB", "4 MB", "8 MB"};
     private static final int[] EASY_Z3_MB = {32, 64, 128, 256, 512};
     private static final String[] EASY_Z3_LABELS = {"32 MB", "64 MB", "128 MB", "256 MB", "512 MB"};
 
@@ -1797,14 +1804,12 @@ public class BootstrapActivity extends Activity {
 
             saveSourceNames();
 
-            // Reset model to A500 (index 0)
+            // Reset model to A500 (index 0) — use direct call since spinner is hidden.
             if (mQsModelSpinner != null && mQsModelSpinner.getCount() > 0) {
                 mQsModelSpinner.setSelection(0);
             }
-            syncRadioToSpinner();
-            updateModelImage();
+            applyModelChangeFromSwipe(0);
 
-            refreshStatus();
             Toast.makeText(this, "All media ejected — device reset", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             android.util.Log.w(TAG, "performRestart failed", t);
@@ -1812,27 +1817,24 @@ public class BootstrapActivity extends Activity {
     }
 
     /**
-     * "Cold Reset" — fully resets the system (kills the running emulator process
-     * and relaunches), but keeps the current hardware setup: model selection,
-     * which drives are added, and which media is inserted.
+     * "Cold Reset" — ejects ALL connected media, resets the model to
+     * A500, and returns to a clean first-run state — as if the app
+     * was just opened for the first time.
      */
     private void performColdReset() {
         try {
-            android.util.Log.i(TAG, "Cold Reset requested (keep HW, restart emulator)");
+            android.util.Log.i(TAG, "Cold Reset requested (full media wipe)");
 
-            // Save current media to UAE prefs so the emulator picks them up on relaunch.
-            applyKickstartAutoForCurrentModel(false);
+            // Reuse the same full-wipe that performRestart does.
+            clearConnectedMediaForColdLauncherStart();
 
-            String qsModel = getSelectedQsModelId();
-            boolean isCdOnly = isCdOnlyModel();
-
-            // If an emulator is already running, kill it and relaunch with current config.
-            if (mLaunchedFromEmulatorMenu) {
-                requestEmulatorRestartAndFinish();
-            } else {
-                // Not launched from emu menu — just (re)start the emulator with current config.
-                startEmulator();
+            // Reset model to A500 (index 0) via direct call since spinner is hidden.
+            if (mQsModelSpinner != null && mQsModelSpinner.getCount() > 0) {
+                mQsModelSpinner.setSelection(0);
             }
+            applyModelChangeFromSwipe(0);
+
+            Toast.makeText(this, "All media ejected — device reset", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             android.util.Log.w(TAG, "performColdReset failed", t);
         }
@@ -5460,17 +5462,58 @@ public class BootstrapActivity extends Activity {
     /** Rebuild the drives strip and old panel stubs. */
     private void updateFloppyGraphicPanel(boolean cdOnly) {
         rebuildDrivesStrip(cdOnly);
+        updateCdPanel(cdOnly);
+    }
+
+    /** Show/hide the CD panel for CD32/CDTV models. */
+    private void updateCdPanel(boolean cdOnly) {
+        View cdPanel = findViewById(R.id.cdPanel);
+        if (cdPanel == null) return;
+        if (!cdOnly) {
+            cdPanel.setVisibility(View.GONE);
+            return;
+        }
+        cdPanel.setVisibility(View.VISIBLE);
+
+        // Update disc status label
+        TextView discStatus = findViewById(R.id.txtCdDiscStatus);
+        if (discStatus != null) {
+            boolean hasDisc = hasCd0();
+            if (hasDisc) {
+                String name = mCd0SourceName;
+                if (name == null || name.trim().isEmpty()) {
+                    name = mSelectedCd0Path != null ? mSelectedCd0Path : "(disc loaded)";
+                    // Shorten path to filename only
+                    int slash = name.lastIndexOf('/');
+                    if (slash >= 0 && slash < name.length() - 1) name = name.substring(slash + 1);
+                    int bslash = name.lastIndexOf('\\');
+                    if (bslash >= 0 && bslash < name.length() - 1) name = name.substring(bslash + 1);
+                }
+                discStatus.setText("\uD83D\uDCBF " + name);
+                discStatus.setTextColor(0xFFFFFFFF);
+            } else {
+                discStatus.setText("No disc loaded");
+                discStatus.setTextColor(0xAAFFFFFF);
+            }
+        }
+
+        // Update Play button state
+        Button btnPlay = findViewById(R.id.btnCdPlay);
+        if (btnPlay != null) {
+            btnPlay.setEnabled(hasCd0());
+            btnPlay.setAlpha(hasCd0() ? 1.0f : 0.4f);
+        }
     }
 
     /** Rebuild the horizontal drives strip as fixed slots (4x DF + spacer + 7x storage/media). */
     private void rebuildDrivesStrip(boolean cdOnly) {
         LinearLayout strip = findViewById(R.id.drivesStripContent);
-        HorizontalScrollView stripScroll = findViewById(R.id.drivesStrip);
+        LinearLayout stripContainer = findViewById(R.id.drivesStrip);
         if (strip == null) return;
         strip.removeAllViews();
 
         if (cdOnly) {
-            if (stripScroll != null) stripScroll.setVisibility(View.GONE);
+            if (stripContainer != null) stripContainer.setVisibility(View.GONE);
             return;
         }
 
@@ -5597,11 +5640,22 @@ public class BootstrapActivity extends Activity {
         addDriveIcon(rowBottom, exitResId, "EXIT", true, false, iconSizePx, actionSpacingPx,
             v -> showExitConfirmDialog(), null, null);
 
-        strip.addView(rowTop);
-        strip.addView(rowBottom);
+        HorizontalScrollView topScroll = new HorizontalScrollView(this);
+        topScroll.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        topScroll.setHorizontalScrollBarEnabled(false);
+        topScroll.addView(rowTop);
+        strip.addView(topScroll);
 
-        if (stripScroll != null) {
-            stripScroll.setVisibility(View.VISIBLE);
+        HorizontalScrollView bottomScroll = new HorizontalScrollView(this);
+        bottomScroll.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        bottomScroll.setHorizontalScrollBarEnabled(false);
+        bottomScroll.addView(rowBottom);
+        strip.addView(bottomScroll);
+
+        if (stripContainer != null) {
+            stripContainer.setVisibility(View.VISIBLE);
         }
     }
 
@@ -5970,6 +6024,164 @@ public class BootstrapActivity extends Activity {
         if (resId != 0) {
             imgModel.setImageResource(resId);
         }
+        // Also update the model name overlay
+        TextView modelNameTxt = findViewById(R.id.txtModelName);
+        if (modelNameTxt != null && mQsModelSpinner != null) {
+            int pos = mQsModelSpinner.getSelectedItemPosition();
+            if (pos >= 0 && pos < QS_MODELS.length) {
+                modelNameTxt.setText(QS_MODELS[pos].label);
+            }
+        }
+    }
+
+    /**
+     * Animate cycling to the next/previous Amiga model with a horizontal slide.
+     * @param direction +1 = next (slide left), -1 = previous (slide right)
+     */
+    private void animateModelChange(int direction) {
+        if (mQsModelSpinner == null) return;
+        android.widget.ImageView imgModel = findViewById(R.id.imgAmigaModel);
+        if (imgModel == null) return;
+
+        int cur = mQsModelSpinner.getSelectedItemPosition();
+        int next = (cur + direction + QS_MODELS.length) % QS_MODELS.length;
+
+        // Resolve the next model's image resource now, before animation
+        int nextResId = resolveModelGraphicResId(QS_MODELS[next].cliId);
+        String nextLabel = QS_MODELS[next].label;
+        TextView modelNameTxt = findViewById(R.id.txtModelName);
+
+        float width = imgModel.getWidth();
+        if (width <= 0) width = imgModel.getResources().getDisplayMetrics().widthPixels;
+
+        // Slide old image out
+        float slideOut = direction > 0 ? -width : width;
+        imgModel.animate().cancel();
+        imgModel.animate()
+            .translationX(slideOut)
+            .alpha(0f)
+            .setDuration(150)
+            .setInterpolator(new android.view.animation.AccelerateInterpolator())
+            .withEndAction(() -> {
+                // Update spinner selection (hidden spinner may not fire listener)
+                mQsModelSpinner.setSelection(next);
+                // Directly set image and name
+                if (nextResId != 0) imgModel.setImageResource(nextResId);
+                if (modelNameTxt != null) modelNameTxt.setText(nextLabel);
+
+                // Manually apply the model-change side effects that the
+                // spinner listener would normally handle (the spinner is
+                // visibility=gone so setSelection() doesn't fire it).
+                applyModelChangeFromSwipe(next);
+
+                // Position new image on opposite side and slide in
+                imgModel.setTranslationX(-slideOut);
+                imgModel.setAlpha(0f);
+                imgModel.animate()
+                    .translationX(0f)
+                    .alpha(1f)
+                    .setDuration(150)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .start();
+            })
+            .start();
+    }
+
+    /**
+     * Apply all the config/prefs/UI changes that normally happen in the model
+     * spinner's onItemSelected callback.  Called directly from the swipe
+     * animation because the hidden spinner doesn't reliably fire its listener.
+     */
+    private void applyModelChangeFromSwipe(int position) {
+        if (position < 0 || position >= QS_MODELS.length) return;
+
+        String prevModelCli = mLastSelectedModelCliId;
+        String nextModelCli = QS_MODELS[position].cliId;
+        boolean modelChanged = prevModelCli == null || !prevModelCli.equalsIgnoreCase(nextModelCli);
+
+        int prevCfg = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getInt(PREF_QS_CONFIG, 0);
+        updateConfigSpinnerForModel(position, prevCfg);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+            .edit()
+            .putString(PREF_QS_MODEL, QS_MODELS[position].prefsId)
+            .apply();
+
+        // Leaving CD32/CDTV: do not keep the CD image mounted.
+        try {
+            boolean prevCdOnly = prevModelCli != null && ("CD32".equalsIgnoreCase(prevModelCli) || "CDTV".equalsIgnoreCase(prevModelCli));
+            boolean nextCdOnly = "CD32".equalsIgnoreCase(nextModelCli) || "CDTV".equalsIgnoreCase(nextModelCli);
+            if (prevCdOnly && !nextCdOnly) {
+                clearCd0Selection();
+                mCd0Added = false;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putBoolean(PREF_SHOW_CD0, false).apply();
+            }
+        } catch (Throwable ignored) {
+        }
+
+        enforceMediaExclusivityForModel(nextModelCli);
+        mLastSelectedModelCliId = nextModelCli;
+
+        if (!"CD32".equalsIgnoreCase(nextModelCli)) {
+            clearExtRomSelection();
+        }
+
+        applyKickstartAutoForCurrentModel(modelChanged);
+        if (modelChanged) setEasyMemoryDefaultsForModel(nextModelCli);
+        syncQuickstartToUaePrefs();
+        updateModelQuickOptionButtons();
+        refreshStatus();
+    }
+
+    /**
+     * Set the easy-setup Chip / Fast spinners to sensible defaults for the
+     * given Amiga model.  Values are based on each model's base hardware.
+     */
+    private void setEasyMemoryDefaultsForModel(String cliId) {
+        if (mEasyChip == null || mEasyFast == null) return;
+        String id = cliId == null ? "" : cliId.toUpperCase(java.util.Locale.ROOT);
+
+        int chipIdx; // index into EASY_CHIP_VALUES  {512K,1M,2M,4M,8M}
+        int fastIdx; // index into EASY_FAST_BYTES    {512K,1M,2M,4M,8M}
+        switch (id) {
+            case "A500":
+            case "A500P":
+                chipIdx = 1; // 1 MB
+                fastIdx = 0; // 512 KB
+                break;
+            case "A600":
+                chipIdx = 2; // 2 MB
+                fastIdx = 0; // 512 KB
+                break;
+            case "A1200":
+                chipIdx = 2; // 2 MB
+                fastIdx = 4; // 8 MB
+                break;
+            case "A3000":
+            case "A4000":
+                chipIdx = 2; // 2 MB
+                fastIdx = 4; // 8 MB
+                break;
+            case "CD32":
+                chipIdx = 2; // 2 MB
+                fastIdx = 0; // 512 KB
+                break;
+            case "CDTV":
+                chipIdx = 1; // 1 MB
+                fastIdx = 0; // 512 KB
+                break;
+            default:
+                chipIdx = 1; // 1 MB
+                fastIdx = 0; // 512 KB
+                break;
+        }
+
+        mBindingEasySetup = true;
+        try {
+            mEasyChip.setSelection(chipIdx);
+            mEasyFast.setSelection(fastIdx);
+        } finally {
+            mBindingEasySetup = false;
+        }
     }
 
     private void onFloppySlotTapped(int slot) {
@@ -5995,31 +6207,54 @@ public class BootstrapActivity extends Activity {
             return;
         }
 
-        if (slot == 0) {
-            openAdfLibraryPageForDrive(0);
-            return;
+        // Activate DF1-3 slots when tapped
+        if (slot >= 1 && slot <= 3) {
+            SharedPreferences.Editor edit = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
+            if (slot == 1) { mDf1Added = true; edit.putBoolean(PREF_SHOW_DF1, true).apply(); }
+            else if (slot == 2) { mDf2Added = true; edit.putBoolean(PREF_SHOW_DF2, true).apply(); }
+            else { mDf3Added = true; edit.putBoolean(PREF_SHOW_DF3, true).apply(); }
+            refreshStatus();
         }
 
-        SharedPreferences.Editor edit = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit();
-        if (slot == 1) {
-            mDf1Added = true;
-            edit.putBoolean(PREF_SHOW_DF1, true).apply();
-            refreshStatus();
-            openAdfLibraryPageForDrive(1);
-            return;
+        // Offer Library or file picker
+        showFloppySourceChooser(slot);
+    }
+
+    private void showFloppySourceChooser(int slot) {
+        new android.app.AlertDialog.Builder(this)
+            .setTitle("DF" + slot + " \u2014 Insert Disk")
+            .setItems(new String[]{"Library", "Browse Files"}, (dialog, which) -> {
+                if (which == 0) {
+                    openAdfLibraryPageForDrive(slot);
+                } else {
+                    openSafFloppyPicker(slot);
+                }
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void openSafFloppyPicker(int slot) {
+        int reqCode;
+        if (slot == 0) reqCode = REQ_IMPORT_DF0;
+        else if (slot == 1) reqCode = REQ_IMPORT_DF1;
+        else if (slot == 2) reqCode = REQ_IMPORT_DF2;
+        else if (slot == 3) reqCode = REQ_IMPORT_DF3;
+        else return;
+
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            intent.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         }
-        if (slot == 2) {
-            mDf2Added = true;
-            edit.putBoolean(PREF_SHOW_DF2, true).apply();
-            refreshStatus();
-            openAdfLibraryPageForDrive(2);
-            return;
-        }
-        if (slot == 3) {
-            mDf3Added = true;
-            edit.putBoolean(PREF_SHOW_DF3, true).apply();
-            refreshStatus();
-            openAdfLibraryPageForDrive(3);
+        maybeSetInitialUriFromUaePathPref(intent, UaeOptionKeys.UAE_PATH_FLOPPIES_DIR);
+        try {
+            startActivityForResult(intent, reqCode);
+        } catch (Throwable t) {
+            Toast.makeText(this, "No file picker available", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -6421,8 +6656,15 @@ public class BootstrapActivity extends Activity {
             if (row1 != null) row1.setVisibility(View.GONE);
             if (row2 != null) row2.setVisibility(View.GONE);
 
+            // Hide the entire left column (RAM/JIT/RTG + game cover) for CD models
+            View leftCol = findViewById(R.id.modelLeftColumn);
+            if (leftCol != null) leftCol.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
+
             if (mEasySetupContainer != null) {
                 mEasySetupContainer.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
+            }
+            if (mEasyOptionsRow != null) {
+                mEasyOptionsRow.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
             }
             if (mEasyJit != null) {
                 mEasyJit.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
@@ -6744,10 +6986,8 @@ public class BootstrapActivity extends Activity {
             }
         }
 
-        TextView insertedSummary = findViewById(R.id.txtInsertedMediaSummary);
-        if (insertedSummary != null) {
-            insertedSummary.setText(buildInsertedMediaSummary(cdOnly));
-        }
+        // Show game cover art when DF0 has media inserted
+        updateGameCover();
 
         if (mDf0Status != null) {
             mDf0Status.setVisibility(View.GONE);
@@ -6766,29 +7006,22 @@ public class BootstrapActivity extends Activity {
             }
         }
 
-        if (mediaActionsColumn instanceof LinearLayout) {
-            ((LinearLayout) mediaActionsColumn).setGravity(cdOnly ? (Gravity.BOTTOM | Gravity.START) : Gravity.CENTER_HORIZONTAL);
-            ViewGroup.LayoutParams baseParams = mediaActionsColumn.getLayoutParams();
-            if (baseParams instanceof LinearLayout.LayoutParams) {
-                LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) baseParams;
-                lp.gravity = cdOnly ? (Gravity.BOTTOM | Gravity.START) : Gravity.CENTER_HORIZONTAL;
-                mediaActionsColumn.setLayoutParams(lp);
+        if (mediaActionsColumn != null) {
+            mediaActionsColumn.setVisibility(cdOnly ? View.GONE : View.VISIBLE);
+            if (!cdOnly && mediaActionsColumn instanceof LinearLayout) {
+                ((LinearLayout) mediaActionsColumn).setGravity(Gravity.CENTER_HORIZONTAL);
+                ViewGroup.LayoutParams baseParams = mediaActionsColumn.getLayoutParams();
+                if (baseParams instanceof LinearLayout.LayoutParams) {
+                    LinearLayout.LayoutParams lp = (LinearLayout.LayoutParams) baseParams;
+                    lp.gravity = Gravity.CENTER_HORIZONTAL;
+                    mediaActionsColumn.setLayoutParams(lp);
+                }
             }
         }
 
         if (mBtnCdCorner != null) {
-            mBtnCdCorner.setVisibility((cdOnly && !agsAutoMountEnabled) ? View.VISIBLE : View.GONE);
-            if (mBtnCdCorner instanceof Button) {
-                Button cdCorner = (Button) mBtnCdCorner;
-                cdCorner.setText("💿 Load CD");
-                cdCorner.setContentDescription("Load CD");
-                cdCorner.setBackgroundColor(android.graphics.Color.TRANSPARENT);
-                cdCorner.setTextColor(android.graphics.Color.WHITE);
-                float density = getResources().getDisplayMetrics().density;
-                cdCorner.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
-                cdCorner.setMinWidth((int) (96 * density));
-                cdCorner.setMinHeight((int) (96 * density));
-            }
+            // CD corner button replaced by cdPanel — always hide
+            mBtnCdCorner.setVisibility(View.GONE);
         }
 
         // When invoked from the emulator overlay, treat this screen as a "resume/restart" shell.
@@ -7110,12 +7343,14 @@ public class BootstrapActivity extends Activity {
         }
 
         mEasySetupContainer = findViewById(R.id.layoutQuickEasySetup);
+        mEasyOptionsRow = findViewById(R.id.layoutEasyOptionsRow);
         mEasyZ3Layout = findViewById(R.id.layoutEasyZ3);
         mEasyJit = findViewById(R.id.chkEasyJit);
         mEasyRtg = findViewById(R.id.chkEasyRtg);
         mEasyChip = findViewById(R.id.spinnerEasyChip);
         mEasyFast = findViewById(R.id.spinnerEasyFast);
         mEasyZ3 = findViewById(R.id.spinnerEasyZ3);
+        mImgGameCover = findViewById(R.id.imgGameCover);
         bindEasySetupControls();
         attachEasySetupListeners();
 
@@ -7256,6 +7491,7 @@ public class BootstrapActivity extends Activity {
                 }
 
                 applyKickstartAutoForCurrentModel(modelChanged);
+                if (modelChanged) setEasyMemoryDefaultsForModel(QS_MODELS[position].cliId);
                 syncQuickstartToUaePrefs();
                 updateModelQuickOptionButtons();
                 refreshStatus();
@@ -7487,12 +7723,52 @@ public class BootstrapActivity extends Activity {
 
         // Kickstart button is now in Model section, no hidden buttons to manage
 
-        // Amiga model image: tap = config dialog, long-press = DF0 insert/eject
+        // Amiga model image: swipe left/right = cycle model, tap = next, long-press = config
         android.widget.ImageView imgAmigaModel = findViewById(R.id.imgAmigaModel);
         if (imgAmigaModel != null) {
-            imgAmigaModel.setOnClickListener(v -> showAmigaConfigDialog());
-            imgAmigaModel.setOnLongClickListener(v -> {
-                onFloppySlotTapped(0);
+            final float density = getResources().getDisplayMetrics().density;
+            final int SWIPE_THRESHOLD = (int) (30 * density);
+            final long LONG_PRESS_MS = 600;
+            final float[] downX = {0};
+            final float[] downY = {0};
+            final long[] downTime = {0};
+            final boolean[] swiped = {false};
+
+            imgAmigaModel.setOnTouchListener((v, event) -> {
+                int action = event.getActionMasked();
+                if (action == android.view.MotionEvent.ACTION_DOWN) {
+                    downX[0] = event.getRawX();
+                    downY[0] = event.getRawY();
+                    downTime[0] = System.currentTimeMillis();
+                    swiped[0] = false;
+                    // Disable ALL parent scroll interception up the chain
+                    for (android.view.ViewParent vp = v.getParent(); vp != null; vp = vp.getParent())
+                        vp.requestDisallowInterceptTouchEvent(true);
+                } else if (action == android.view.MotionEvent.ACTION_MOVE) {
+                    float dx = event.getRawX() - downX[0];
+                    if (!swiped[0] && Math.abs(dx) > SWIPE_THRESHOLD) {
+                        swiped[0] = true;
+                        // Swipe left = next (+1), swipe right = previous (-1)
+                        animateModelChange(dx < 0 ? 1 : -1);
+                    }
+                } else if (action == android.view.MotionEvent.ACTION_UP) {
+                    for (android.view.ViewParent vp = v.getParent(); vp != null; vp = vp.getParent())
+                        vp.requestDisallowInterceptTouchEvent(false);
+                    long elapsed = System.currentTimeMillis() - downTime[0];
+                    float totalDx = Math.abs(event.getRawX() - downX[0]);
+                    float totalDy = Math.abs(event.getRawY() - downY[0]);
+                    if (!swiped[0] && totalDx < 15 * density && totalDy < 15 * density) {
+                        if (elapsed >= LONG_PRESS_MS) {
+                            showAmigaConfigDialog();
+                        } else {
+                            // Tap = next model with animation
+                            animateModelChange(1);
+                        }
+                    }
+                } else if (action == android.view.MotionEvent.ACTION_CANCEL) {
+                    for (android.view.ViewParent vp = v.getParent(); vp != null; vp = vp.getParent())
+                        vp.requestDisallowInterceptTouchEvent(false);
+                }
                 return true;
             });
         }
@@ -7509,6 +7785,16 @@ public class BootstrapActivity extends Activity {
 
         if (mBtnCdCorner != null) {
             mBtnCdCorner.setOnClickListener(v -> ensureCd0AndPick());
+        }
+
+        // CD panel buttons (Load Disc / Play) for CD32/CDTV mode
+        Button btnCdLoadDisc = findViewById(R.id.btnCdLoadDisc);
+        if (btnCdLoadDisc != null) {
+            btnCdLoadDisc.setOnClickListener(v -> ensureCd0AndPick());
+        }
+        Button btnCdPlay = findViewById(R.id.btnCdPlay);
+        if (btnCdPlay != null) {
+            btnCdPlay.setOnClickListener(v -> startEmulator());
         }
 
         // Ext ROM import/clear is intentionally hidden. Kickstart Map is the only entry point.
@@ -8768,11 +9054,204 @@ public class BootstrapActivity extends Activity {
             String accessToken = IgdbCredentialProvider.resolveAccessToken(p, PREF_IGDB_ACCESS_TOKEN);
             OnlineAdfCatalogService.IgdbResult result = OnlineAdfCatalogService.searchIgdb(clientId, accessToken, clientSecret, fallbackTitle);
             if (result != null && result.name != null && !result.name.trim().isEmpty()) {
+                // Also cache cover URL if available
+                if (result.coverUrl != null && !result.coverUrl.trim().isEmpty()) {
+                    putCachedIgdbCoverUrl(fallbackTitle, result.coverUrl);
+                }
                 return result.name.trim();
             }
         } catch (Throwable ignored) {
         }
         return fallbackTitle;
+    }
+
+    // ---- Game cover art helpers ----
+
+    private String getCachedIgdbCoverUrl(String fileName) {
+        try {
+            if (fileName == null || fileName.trim().isEmpty()) return null;
+            String key = PREF_IGDB_COVER_URL_CACHE_PREFIX + fileName.trim().toLowerCase(Locale.ROOT);
+            return getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(key, null);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private void putCachedIgdbCoverUrl(String fileName, String coverUrl) {
+        try {
+            if (fileName == null || coverUrl == null) return;
+            String f = fileName.trim().toLowerCase(Locale.ROOT);
+            String u = coverUrl.trim();
+            if (f.isEmpty() || u.isEmpty()) return;
+            String key = PREF_IGDB_COVER_URL_CACHE_PREFIX + f;
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().putString(key, u).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private File getCoverCacheDir() {
+        File dir = new File(getCacheDir(), "igdb_covers");
+        ensureDir(dir);
+        return dir;
+    }
+
+    private File getCoverCacheFile(String url) {
+        String key = coverSha1(url == null ? "" : url.trim());
+        if (key == null || key.trim().isEmpty()) {
+            key = Integer.toHexString((url == null ? "" : url).hashCode());
+        }
+        return new File(getCoverCacheDir(), key + ".img");
+    }
+
+    private String coverSha1(String text) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-1");
+            byte[] d = md.digest((text == null ? "" : text).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : d) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private android.graphics.Bitmap downloadCoverBitmap(String url, File outFile) {
+        java.net.HttpURLConnection conn = null;
+        InputStream in = null;
+        FileOutputStream out = null;
+        try {
+            conn = (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setRequestProperty("User-Agent", "uae4arm_2026/1.0");
+            conn.connect();
+            int code = conn.getResponseCode();
+            if (code < 200 || code >= 300) return null;
+            in = conn.getInputStream();
+            if (outFile != null) {
+                ensureDir(outFile.getParentFile());
+                out = new FileOutputStream(outFile);
+                byte[] buf = new byte[16 * 1024];
+                int r;
+                while ((r = in.read(buf)) != -1) {
+                    out.write(buf, 0, r);
+                }
+                out.flush();
+                return android.graphics.BitmapFactory.decodeFile(outFile.getAbsolutePath());
+            }
+            return android.graphics.BitmapFactory.decodeStream(in);
+        } catch (Throwable ignored) {
+            return null;
+        } finally {
+            try { if (in != null) in.close(); } catch (Throwable ignored) {}
+            try { if (out != null) out.close(); } catch (Throwable ignored) {}
+            try { if (conn != null) conn.disconnect(); } catch (Throwable ignored) {}
+        }
+    }
+
+    private void bindGameCover(android.widget.ImageView iv, String url) {
+        if (url == null || url.trim().isEmpty()) {
+            iv.setVisibility(View.GONE);
+            return;
+        }
+
+        File coverFile = getCoverCacheFile(url);
+        if (coverFile.exists() && coverFile.isFile() && coverFile.length() > 0) {
+            android.graphics.Bitmap diskBmp = android.graphics.BitmapFactory.decodeFile(coverFile.getAbsolutePath());
+            if (diskBmp != null) {
+                synchronized (mCoverCache) { mCoverCache.put(url, diskBmp); }
+                iv.setImageBitmap(diskBmp);
+                iv.setVisibility(View.VISIBLE);
+                return;
+            }
+        }
+
+        android.graphics.Bitmap cached;
+        synchronized (mCoverCache) { cached = mCoverCache.get(url); }
+        if (cached != null) {
+            iv.setImageBitmap(cached);
+            iv.setVisibility(View.VISIBLE);
+            return;
+        }
+
+        iv.setTag(url);
+        iv.setVisibility(View.GONE);
+        synchronized (mCoverLoading) {
+            if (mCoverLoading.contains(url)) return;
+            mCoverLoading.add(url);
+        }
+
+        new Thread(() -> {
+            android.graphics.Bitmap bmp = null;
+            try {
+                bmp = downloadCoverBitmap(url, coverFile);
+                if (bmp != null) {
+                    synchronized (mCoverCache) { mCoverCache.put(url, bmp); }
+                }
+            } catch (Throwable ignored) {
+            } finally {
+                synchronized (mCoverLoading) { mCoverLoading.remove(url); }
+            }
+            final android.graphics.Bitmap finalBmp = bmp;
+            runOnUiThread(() -> {
+                Object tag = iv.getTag();
+                if (tag != null && tag.equals(url) && finalBmp != null) {
+                    iv.setImageBitmap(finalBmp);
+                    iv.setVisibility(View.VISIBLE);
+                }
+            });
+        }).start();
+    }
+
+    private void updateGameCover() {
+        if (mImgGameCover == null) return;
+
+        // Determine the current DF0 file name for cover lookup
+        String df0Name = mDf0SourceName;
+        if ((df0Name == null || df0Name.trim().isEmpty()) && mSelectedDf0Path != null) {
+            // Extract filename from path
+            String path = mSelectedDf0Path;
+            int sep = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+            df0Name = (sep >= 0) ? path.substring(sep + 1) : path;
+        }
+        if ((df0Name == null || df0Name.trim().isEmpty()) && mSelectedDf0 != null && mSelectedDf0.exists()) {
+            df0Name = mSelectedDf0.getName();
+        }
+
+        if (df0Name == null || df0Name.trim().isEmpty()) {
+            mImgGameCover.setVisibility(View.GONE);
+            return;
+        }
+
+        String coverUrl = getCachedIgdbCoverUrl(df0Name);
+        if (coverUrl != null && !coverUrl.trim().isEmpty()) {
+            bindGameCover(mImgGameCover, coverUrl);
+        } else {
+            // No cached cover — try fetching from IGDB in background
+            mImgGameCover.setVisibility(View.GONE);
+            final String fileName = df0Name;
+            new Thread(() -> {
+                try {
+                    String pretty = derivePrettyTitleFromDiskFileName(fileName);
+                    if (pretty == null || pretty.trim().isEmpty()) return;
+                    SharedPreferences p = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+                    String clientId = IgdbCredentialProvider.resolveClientId(p, PREF_IGDB_CLIENT_ID);
+                    String clientSecret = IgdbCredentialProvider.resolveClientSecret(p, PREF_IGDB_CLIENT_SECRET);
+                    String accessToken = IgdbCredentialProvider.resolveAccessToken(p, PREF_IGDB_ACCESS_TOKEN);
+                    OnlineAdfCatalogService.IgdbResult result = OnlineAdfCatalogService.searchIgdb(
+                            clientId, accessToken, clientSecret, pretty);
+                    if (result != null && result.coverUrl != null && !result.coverUrl.trim().isEmpty()) {
+                        putCachedIgdbCoverUrl(fileName, result.coverUrl);
+                        runOnUiThread(() -> {
+                            if (mImgGameCover != null) {
+                                bindGameCover(mImgGameCover, result.coverUrl);
+                            }
+                        });
+                    }
+                } catch (Throwable ignored) {
+                }
+            }).start();
+        }
     }
 
     private static final class LocalAdfLibraryEntry {

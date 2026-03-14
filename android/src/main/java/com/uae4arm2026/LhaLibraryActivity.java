@@ -44,6 +44,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.security.MessageDigest;
+import android.provider.DocumentsContract;
 
 public class LhaLibraryActivity extends Activity {
     private static final String PREFS_BOOTSTRAP = "bootstrap";
@@ -60,7 +61,8 @@ public class LhaLibraryActivity extends Activity {
     private static final String PREF_LIBRARY_VIEW_MODE = "lha_library_view_mode";
     private static final int VIEW_MODE_LIST = 0;
     private static final int VIEW_MODE_COVERS = 1;
-    private static final int VIEW_MODE_CAROUSEL = 2;
+    private static final int VIEW_MODE_DISKS = 2;
+    private static final String PREF_IGDB_ENRICHED_FILES = "igdb_enriched_files";
     private static final String PREF_LHA_CATEGORY_PREFIX = "lha_category_";
     private static final String CATEGORY_ARCADE = "arcade";
     private static final List<String> CONSOLE_MARKERS = Arrays.asList(
@@ -107,12 +109,11 @@ public class LhaLibraryActivity extends Activity {
     private ProgressBar progress;
     private TextView status;
     private ListView list;
-    private HorizontalScrollView carouselScroll;
-    private LinearLayout carouselStrip;
     private ImageButton refreshIgdbBtn;
     private ImageButton viewModeBtn;
     private ImageButton logsBtn;
     private ImageButton setupBtn;
+    private TextView safStatus;
     private LibraryAdapter adapter;
     private int libraryViewMode = VIEW_MODE_LIST;
 
@@ -190,6 +191,12 @@ public class LhaLibraryActivity extends Activity {
         status.setText("Loading LHA games...");
         status.setPadding(0, (int) (8 * d), 0, (int) (8 * d));
 
+        safStatus = new TextView(this);
+        safStatus.setTextSize(11f);
+        safStatus.setAlpha(0.75f);
+        safStatus.setPadding(0, 0, 0, (int) (4 * d));
+        safStatus.setVisibility(View.GONE);
+
         progress = new ProgressBar(this);
         progress.setIndeterminate(true);
 
@@ -206,35 +213,13 @@ public class LhaLibraryActivity extends Activity {
             return true;
         });
 
-        carouselStrip = new LinearLayout(this);
-        carouselStrip.setOrientation(LinearLayout.HORIZONTAL);
-        carouselStrip.setGravity(Gravity.CENTER_VERTICAL);
-        carouselStrip.setPadding(dp(4), dp(4), dp(4), dp(4));
-
-        carouselScroll = new HorizontalScrollView(this);
-        carouselScroll.setHorizontalScrollBarEnabled(true);
-        carouselScroll.setFillViewport(true);
-        carouselScroll.addView(carouselStrip, new ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
-        FrameLayout contentHost = new FrameLayout(this);
-        contentHost.addView(list, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-        contentHost.addView(carouselScroll, new FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ));
-
         applyLibraryViewModeUi();
 
         root.addView(top, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(status, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        root.addView(safStatus, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
         root.addView(progress, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
-        root.addView(contentHost, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
+        root.addView(list, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
 
         setContentView(root);
     }
@@ -242,7 +227,7 @@ public class LhaLibraryActivity extends Activity {
     private int getSavedLibraryViewMode() {
         try {
             int mode = getSharedPreferences(PREFS_BOOTSTRAP, MODE_PRIVATE).getInt(PREF_LIBRARY_VIEW_MODE, VIEW_MODE_LIST);
-            if (mode < VIEW_MODE_LIST || mode > VIEW_MODE_CAROUSEL) return VIEW_MODE_LIST;
+            if (mode < VIEW_MODE_LIST || mode > VIEW_MODE_DISKS) return VIEW_MODE_LIST;
             return mode;
         } catch (Throwable ignored) {
             return VIEW_MODE_LIST;
@@ -258,105 +243,56 @@ public class LhaLibraryActivity extends Activity {
 
     private void cycleLibraryViewMode() {
         libraryViewMode++;
-        if (libraryViewMode > VIEW_MODE_CAROUSEL) {
+        if (libraryViewMode > VIEW_MODE_DISKS) {
             libraryViewMode = VIEW_MODE_LIST;
         }
         setSavedLibraryViewMode(libraryViewMode);
         applyLibraryViewModeUi();
         notifyLibraryDataChanged();
-        String label = libraryViewMode == VIEW_MODE_LIST
-            ? "List view"
-            : (libraryViewMode == VIEW_MODE_COVERS ? "Covers view" : "Carousel view");
+        String label;
+        switch (libraryViewMode) {
+            case VIEW_MODE_COVERS: label = "Covers view"; break;
+            case VIEW_MODE_DISKS: label = "Disks view"; break;
+            default: label = "List view"; break;
+        }
         Toast.makeText(this, label, Toast.LENGTH_SHORT).show();
     }
 
     private void applyLibraryViewModeUi() {
         if (viewModeBtn != null) {
-            if (libraryViewMode == VIEW_MODE_LIST) {
-                viewModeBtn.setImageResource(android.R.drawable.ic_menu_sort_by_size);
-                viewModeBtn.setContentDescription("View mode: List");
-            } else if (libraryViewMode == VIEW_MODE_COVERS) {
-                viewModeBtn.setImageResource(android.R.drawable.ic_menu_gallery);
-                viewModeBtn.setContentDescription("View mode: Covers");
-            } else {
-                viewModeBtn.setImageResource(android.R.drawable.ic_menu_slideshow);
-                viewModeBtn.setContentDescription("View mode: Carousel");
+            switch (libraryViewMode) {
+                case VIEW_MODE_COVERS:
+                    viewModeBtn.setImageResource(android.R.drawable.ic_menu_gallery);
+                    viewModeBtn.setContentDescription("View mode: Covers");
+                    break;
+                case VIEW_MODE_DISKS:
+                    viewModeBtn.setImageResource(android.R.drawable.ic_menu_compass);
+                    viewModeBtn.setContentDescription("View mode: Disks");
+                    break;
+                default:
+                    viewModeBtn.setImageResource(android.R.drawable.ic_menu_sort_by_size);
+                    viewModeBtn.setContentDescription("View mode: List");
+                    break;
             }
         }
         if (list != null) {
             list.setDividerHeight(libraryViewMode == VIEW_MODE_COVERS ? dp(2) : dp(6));
-            list.setVisibility(libraryViewMode == VIEW_MODE_CAROUSEL ? View.GONE : View.VISIBLE);
-        }
-        if (carouselScroll != null) {
-            carouselScroll.setVisibility(libraryViewMode == VIEW_MODE_CAROUSEL ? View.VISIBLE : View.GONE);
-            if (libraryViewMode == VIEW_MODE_CAROUSEL) {
-                rebuildCarouselStrip();
-            }
         }
     }
 
     private void notifyLibraryDataChanged() {
         if (adapter != null) adapter.notifyDataSetChanged();
-        if (libraryViewMode == VIEW_MODE_CAROUSEL) rebuildCarouselStrip();
     }
 
     private void rebuildCarouselStrip() {
-        if (carouselStrip == null) return;
-        carouselStrip.removeAllViews();
-        if (entries.isEmpty()) return;
-
-        for (LhaEntry e : entries) {
-            if (e == null) continue;
-
-            LinearLayout card = new LinearLayout(this);
-            card.setOrientation(LinearLayout.VERTICAL);
-            card.setGravity(Gravity.CENTER_HORIZONTAL);
-            card.setPadding(dp(8), dp(8), dp(8), dp(8));
-
-            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(dp(210), ViewGroup.LayoutParams.MATCH_PARENT);
-            cardLp.rightMargin = dp(8);
-
-            ImageView cover = new ImageView(this);
-            cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            LinearLayout.LayoutParams coverLp = new LinearLayout.LayoutParams(dp(180), dp(240));
-            card.addView(cover, coverLp);
-
-            TextView title = new TextView(this);
-            title.setTextSize(15f);
-            title.setMaxLines(2);
-            title.setGravity(Gravity.CENTER_HORIZONTAL);
-            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            titleLp.topMargin = dp(6);
-            card.addView(title, titleLp);
-
-            TextView subtitle = new TextView(this);
-            subtitle.setTextSize(12f);
-            subtitle.setAlpha(0.85f);
-            subtitle.setGravity(Gravity.CENTER_HORIZONTAL);
-            card.addView(subtitle, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-            String t = (e.displayTitle == null || e.displayTitle.trim().isEmpty()) ? displayNameFromArchive(e.fileName) : e.displayTitle;
-            title.setText(t);
-            String sub = e.fileName == null ? "(unknown)" : e.fileName;
-            if (isArcadeCategory(e)) sub = sub + "  •  Arcade";
-            subtitle.setText(sub);
-
-            bindCover(cover, e.coverUrl);
-
-            card.setOnClickListener(v -> launchEntry(e));
-            card.setOnLongClickListener(v -> {
-                promptEntryActions(e);
-                return true;
-            });
-
-            carouselStrip.addView(card, cardLp);
-        }
+        // carousel removed
     }
 
     private void loadLibraryAsync() {
         progress.setVisibility(View.VISIBLE);
         new Thread(() -> {
             ArrayList<LhaEntry> loaded = new ArrayList<>();
+            final String safReport = buildSafPermissionReport();
             try {
                 SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
                 String lhaPath = BootstrapPathResolver.resolveConfiguredPathForKeyWithParentFallback(p, UaeOptionKeys.UAE_PATH_LHA_DIR);
@@ -385,15 +321,115 @@ public class LhaLibraryActivity extends Activity {
                 entries.addAll(loaded);
                 notifyLibraryDataChanged();
                 progress.setVisibility(View.GONE);
+                if (safReport != null && !safReport.isEmpty()) {
+                    safStatus.setText(safReport);
+                    safStatus.setVisibility(View.VISIBLE);
+                }
                 if (entries.isEmpty()) {
                     status.setText("No LHA files found in configured lha folder");
                     Toast.makeText(this, "No LHA games found", Toast.LENGTH_SHORT).show();
                 } else {
                     updateStatusText();
-                    enrichFromIgdbAsync(false);
+                    if (hasNewUnenrichedFiles()) {
+                        enrichFromIgdbAsync(false);
+                    } else {
+                        applyCachedIgdbData();
+                    }
                 }
             });
         }).start();
+    }
+
+    private String buildSafPermissionReport() {
+        try {
+            SharedPreferences p = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String parentTreeUri = p.getString(UaeOptionKeys.UAE_PATH_PARENT_TREE_URI, null);
+            if (parentTreeUri == null || parentTreeUri.trim().isEmpty()) {
+                String parentDir = p.getString(UaeOptionKeys.UAE_PATH_PARENT_DIR, null);
+                if (parentDir != null && ConfigStorage.isSafJoinedPath(parentDir)) {
+                    ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(parentDir);
+                    if (sp != null) parentTreeUri = sp.treeUri;
+                } else if (parentDir != null && parentDir.trim().startsWith("content://")) {
+                    parentTreeUri = parentDir.trim();
+                }
+            }
+            if (parentTreeUri == null || parentTreeUri.trim().isEmpty()) {
+                return "SAF: No parent folder configured";
+            }
+            parentTreeUri = parentTreeUri.trim();
+
+            boolean parentRead = false;
+            boolean parentWrite = false;
+            List<android.content.UriPermission> perms = getContentResolver().getPersistedUriPermissions();
+            if (perms != null) {
+                Uri parentUri = Uri.parse(parentTreeUri);
+                for (android.content.UriPermission perm : perms) {
+                    if (perm == null) continue;
+                    Uri pu = perm.getUri();
+                    if (pu != null && pu.equals(parentUri)) {
+                        parentRead = perm.isReadPermission();
+                        parentWrite = perm.isWritePermission();
+                        break;
+                    }
+                }
+            }
+
+            StringBuilder sb = new StringBuilder();
+            String parentLabel = friendlySafLabel(parentTreeUri);
+            sb.append("SAF ").append(parentLabel).append(": ");
+            if (parentRead && parentWrite) sb.append("R+W");
+            else if (parentRead) sb.append("R only (no write)");
+            else sb.append("NO PERMISSION");
+
+            // Check key subfolders are accessible
+            String[] subKeys = {
+                UaeOptionKeys.UAE_PATH_LHA_DIR,
+                UaeOptionKeys.UAE_PATH_ROMS_DIR,
+                UaeOptionKeys.UAE_PATH_FLOPPIES_DIR,
+                UaeOptionKeys.UAE_PATH_HARDDRIVES_DIR,
+                UaeOptionKeys.UAE_PATH_WHDBOOT_DIR
+            };
+            String[] subLabels = { "lha", "roms", "disks", "hd", "whdboot" };
+            for (int i = 0; i < subKeys.length; i++) {
+                String resolved = BootstrapPathResolver.resolveConfiguredPathForKeyWithParentFallback(p, subKeys[i]);
+                if (resolved == null || resolved.trim().isEmpty()) continue;
+                boolean accessible = false;
+                try {
+                    if (ConfigStorage.isSafJoinedPath(resolved)) {
+                        ConfigStorage.SafPath sp = ConfigStorage.splitSafJoinedPath(resolved);
+                        if (sp != null) {
+                            DocumentFile df = resolveSafDirectory(sp.treeUri, sp.relPath);
+                            accessible = df != null && df.exists() && df.isDirectory();
+                        }
+                    } else if (resolved.startsWith("content://")) {
+                        DocumentFile df = DocumentFile.fromTreeUri(this, Uri.parse(resolved));
+                        accessible = df != null && df.exists() && df.isDirectory();
+                    } else {
+                        File f = new File(resolved);
+                        accessible = f.exists() && f.isDirectory();
+                    }
+                } catch (Throwable ignored) {}
+                sb.append("  |  ").append(subLabels[i]).append(": ").append(accessible ? "OK" : "MISSING");
+            }
+            return sb.toString();
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    private String friendlySafLabel(String treeUri) {
+        if (treeUri == null) return "(unknown)";
+        try {
+            Uri u = Uri.parse(treeUri);
+            String docId = DocumentsContract.getTreeDocumentId(u);
+            if (docId != null && !docId.isEmpty()) {
+                // e.g. "primary:uae4arm" -> "uae4arm"
+                int colon = docId.lastIndexOf(':');
+                if (colon >= 0 && colon + 1 < docId.length()) return docId.substring(colon + 1);
+                return docId;
+            }
+        } catch (Throwable ignored) {}
+        return "(folder)";
     }
 
     private void collectFsLhaEntries(File dir, ArrayList<LhaEntry> out) {
@@ -858,6 +894,46 @@ public class LhaLibraryActivity extends Activity {
         return out == null ? null : out.result;
     }
 
+    private boolean hasNewUnenrichedFiles() {
+        try {
+            Set<String> seen = getSharedPreferences(PREFS_BOOTSTRAP, MODE_PRIVATE)
+                .getStringSet(PREF_IGDB_ENRICHED_FILES, null);
+            if (seen == null || seen.isEmpty()) return true;
+            for (LhaEntry e : entries) {
+                if (e != null && e.fileName != null && !seen.contains(e.fileName.trim().toLowerCase(Locale.ROOT))) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    private void saveEnrichedFileSet() {
+        try {
+            HashSet<String> set = new HashSet<>();
+            for (LhaEntry e : entries) {
+                if (e != null && e.fileName != null) set.add(e.fileName.trim().toLowerCase(Locale.ROOT));
+            }
+            getSharedPreferences(PREFS_BOOTSTRAP, MODE_PRIVATE).edit()
+                .putStringSet(PREF_IGDB_ENRICHED_FILES, set).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void applyCachedIgdbData() {
+        for (LhaEntry entry : entries) {
+            if (entry == null || entry.fileName == null) continue;
+            String cached = getCachedIgdbTitle(entry.fileName);
+            String cachedCover = getCachedIgdbCoverUrl(entry.fileName);
+            if (cached != null && !cached.trim().isEmpty()) entry.displayTitle = cached.trim();
+            if (cachedCover != null && !cachedCover.trim().isEmpty()) entry.coverUrl = cachedCover.trim();
+        }
+        Collections.sort(entries, Comparator.comparing(a -> a.displayTitle.toLowerCase(Locale.ROOT)));
+        notifyLibraryDataChanged();
+    }
+
     private void enrichFromIgdbAsync(boolean forceRefresh) {
         if (entries.isEmpty()) {
             Toast.makeText(this, "No LHA games to refresh", Toast.LENGTH_SHORT).show();
@@ -904,6 +980,7 @@ public class LhaLibraryActivity extends Activity {
             runOnUiThread(() -> {
                 progress.setVisibility(View.GONE);
                 notifyLibraryDataChanged();
+                saveEnrichedFileSet();
                 Toast.makeText(this, "IGDB refresh: updated " + updatedFinal + " / " + entries.size(), Toast.LENGTH_LONG).show();
             });
         }).start();
@@ -1260,30 +1337,35 @@ public class LhaLibraryActivity extends Activity {
 
         @Override
         public View getView(int position, View convertView, ViewGroup parent) {
-            int mode = libraryViewMode == VIEW_MODE_COVERS ? VIEW_MODE_COVERS : VIEW_MODE_LIST;
+            int mode = libraryViewMode;
             RowHolder holder;
             if (convertView == null || !(convertView.getTag() instanceof RowHolder) || ((RowHolder) convertView.getTag()).mode != mode) {
                 boolean coversMode = mode == VIEW_MODE_COVERS;
+                boolean disksMode = mode == VIEW_MODE_DISKS;
                 LinearLayout row = new LinearLayout(LhaLibraryActivity.this);
                 row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setPadding(dp(10), coversMode ? dp(6) : dp(8), dp(10), coversMode ? dp(6) : dp(8));
+                row.setPadding(dp(10), disksMode ? dp(4) : (coversMode ? dp(6) : dp(8)), dp(10), disksMode ? dp(4) : (coversMode ? dp(6) : dp(8)));
 
-                ImageView cover = new ImageView(LhaLibraryActivity.this);
-                cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
-                    coversMode ? dp(96) : dp(72),
-                    coversMode ? dp(128) : dp(96)
-                );
-                clp.rightMargin = dp(10);
-                row.addView(cover, clp);
+                ImageView cover = null;
+                if (!disksMode) {
+                    cover = new ImageView(LhaLibraryActivity.this);
+                    cover.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(
+                        coversMode ? dp(96) : dp(72),
+                        coversMode ? dp(128) : dp(96)
+                    );
+                    clp.rightMargin = dp(10);
+                    row.addView(cover, clp);
+                }
 
                 LinearLayout textWrap = new LinearLayout(LhaLibraryActivity.this);
                 textWrap.setOrientation(LinearLayout.VERTICAL);
+                textWrap.setGravity(disksMode ? Gravity.CENTER_VERTICAL : Gravity.TOP);
                 textWrap.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
                 TextView title = new TextView(LhaLibraryActivity.this);
-                title.setTextSize(coversMode ? 17f : 16f);
-                title.setTypeface(null, android.graphics.Typeface.BOLD);
+                title.setTextSize(disksMode ? 14f : (coversMode ? 17f : 16f));
+                if (!disksMode) title.setTypeface(null, android.graphics.Typeface.BOLD);
                 title.setMaxLines(coversMode ? 2 : 1);
                 textWrap.addView(title, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1291,8 +1373,8 @@ public class LhaLibraryActivity extends Activity {
                 ));
 
                 TextView subtitle = new TextView(LhaLibraryActivity.this);
-                subtitle.setTextSize(12f);
-                subtitle.setAlpha(0.85f);
+                subtitle.setTextSize(disksMode ? 11f : 12f);
+                subtitle.setAlpha(0.65f);
                 subtitle.setMaxLines(coversMode ? 3 : 1);
                 textWrap.addView(subtitle, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
@@ -1313,13 +1395,19 @@ public class LhaLibraryActivity extends Activity {
             }
 
             LhaEntry e = entries.get(position);
-            holder.title.setText(e.displayTitle == null || e.displayTitle.trim().isEmpty() ? displayNameFromArchive(e.fileName) : e.displayTitle);
-            String subtitle = e.fileName == null ? "(unknown)" : e.fileName;
-            if (e.category != null && CATEGORY_ARCADE.equalsIgnoreCase(e.category.trim())) {
-                subtitle = subtitle + "  •  Arcade";
+            if (mode == VIEW_MODE_DISKS) {
+                holder.title.setText(e.fileName == null ? "(unknown)" : e.fileName);
+                String igdbTitle = e.displayTitle == null || e.displayTitle.trim().isEmpty() ? "" : e.displayTitle.trim();
+                holder.subtitle.setText(igdbTitle);
+            } else {
+                holder.title.setText(e.displayTitle == null || e.displayTitle.trim().isEmpty() ? displayNameFromArchive(e.fileName) : e.displayTitle);
+                String subtitle = e.fileName == null ? "(unknown)" : e.fileName;
+                if (e.category != null && CATEGORY_ARCADE.equalsIgnoreCase(e.category.trim())) {
+                    subtitle = subtitle + "  •  Arcade";
+                }
+                holder.subtitle.setText(subtitle);
             }
-            holder.subtitle.setText(subtitle);
-            bindCover(holder.cover, e.coverUrl);
+            if (holder.cover != null) bindCover(holder.cover, e.coverUrl);
             return convertView;
         }
     }

@@ -187,15 +187,19 @@
                         android:ellipsize="end"
                         android:visibility="visible" />
 
-                    <ImageButton
+                    <Button
                         android:id="@+id/btnConfigsTop"
-                        android:layout_width="44dp"
-                        android:layout_height="44dp"
+                        android:layout_width="wrap_content"
+                        android:layout_height="36dp"
                         android:layout_marginStart="6dp"
-                        android:background="?android:attr/selectableItemBackgroundBorderless"
-                        android:contentDescription="Configs"
-                        android:padding="8dp"
-                        android:src="@android:drawable/ic_menu_manage" />
+                        android:background="?android:attr/selectableItemBackground"
+                        android:text="Configs"
+                        android:textSize="11sp"
+                        android:textColor="@android:color/white"
+                        android:minWidth="0dp"
+                        android:minHeight="0dp"
+                        android:paddingStart="10dp"
+                        android:paddingEnd="10dp" />
 
                 </LinearLayout>
 
@@ -235,6 +239,7 @@
 
                     <!-- Model selector + easy setup (compact) -->
                     <ScrollView
+                        android:id="@+id/modelLeftColumn"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1"
@@ -245,174 +250,120 @@
                             android:layout_height="wrap_content"
                             android:orientation="vertical">
 
-                            <TextView
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:text="Model"
-                                android:textSize="10sp"
-                                android:textStyle="bold" />
+                            <!-- Hidden model spinner (kept for Java compat) -->
+                            <Spinner
+                                android:id="@+id/spinnerQsModel"
+                                android:layout_width="0dp"
+                                android:layout_height="0dp"
+                                android:visibility="gone" />
 
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:orientation="horizontal">
-
-                                <Spinner
-                                    android:id="@+id/spinnerQsModel"
-                                    android:layout_width="0dp"
-                                    android:layout_height="40dp"
-                                    android:layout_weight="1"
-                                    android:layout_marginEnd="2dp"
-                                    android:background="#111111" />
-
-                                <LinearLayout
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:layout_marginStart="6dp"
-                                    android:orientation="horizontal"
-                                    android:gravity="end|center_vertical">
-
-                                    <CheckBox
-                                        android:id="@+id/chkEasyJit"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="32dp"
-                                        android:minHeight="0dp"
-                                        android:padding="0dp"
-                                        android:text="JIT"
-                                        android:textSize="9sp" />
-
-                                    <CheckBox
-                                        android:id="@+id/chkEasyRtg"
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="32dp"
-                                        android:layout_marginStart="10dp"
-                                        android:minHeight="0dp"
-                                        android:padding="0dp"
-                                        android:text="RTG"
-                                        android:textSize="9sp" />
-                                </LinearLayout>
-                            </LinearLayout>
-
+                            <!-- Memory row: Chip + Fast + Z3 (Z3 shown when RTG checked) -->
                             <LinearLayout
                                 android:id="@+id/layoutQuickEasySetup"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:orientation="vertical"
-                                android:padding="2dp"
+                                android:orientation="horizontal"
+                                android:padding="4dp"
                                 android:background="@drawable/bg_section_model"
-                                android:visibility="visible">
+                                android:gravity="center_vertical">
 
-                                <LinearLayout
-                                    android:layout_width="match_parent"
+                                <TextView
+                                    android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:layout_marginTop="1dp"
-                                    android:orientation="horizontal">
+                                    android:text="Chip"
+                                    android:textSize="9sp"
+                                    android:layout_marginEnd="4dp" />
 
-                                    <LinearLayout
-                                        android:layout_width="0dp"
+                                <Spinner
+                                    android:id="@+id/spinnerEasyChip"
+                                    android:layout_width="0dp"
+                                    android:layout_height="32dp"
+                                    android:layout_weight="1"
+                                    android:layout_marginEnd="8dp"
+                                    android:background="#111111" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Fast"
+                                    android:textSize="9sp"
+                                    android:layout_marginEnd="4dp" />
+
+                                <Spinner
+                                    android:id="@+id/spinnerEasyFast"
+                                    android:layout_width="0dp"
+                                    android:layout_height="32dp"
+                                    android:layout_weight="1"
+                                    android:background="#111111" />
+
+                                <!-- Z3 (shown only when RTG checked) -->
+                                <LinearLayout
+                                    android:id="@+id/layoutEasyZ3"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:orientation="horizontal"
+                                    android:gravity="center_vertical"
+                                    android:layout_marginStart="8dp"
+                                    android:visibility="gone">
+
+                                    <TextView
+                                        android:layout_width="wrap_content"
                                         android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:orientation="vertical"
-                                        android:layout_marginEnd="2dp">
+                                        android:text="Z3"
+                                        android:textSize="9sp"
+                                        android:layout_marginEnd="4dp" />
 
-                                        <TextView
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="Chip"
-                                            android:textSize="9sp" />
-
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:orientation="horizontal">
-
-                                            <Spinner
-                                                android:id="@+id/spinnerEasyChip"
-                                                android:layout_width="0dp"
-                                                android:layout_height="40dp"
-                                                android:layout_weight="1"
-                                                android:layout_marginEnd="1dp"
-                                                android:background="#111111" />
-
-                                            <Space
-                                                android:layout_width="0dp"
-                                                android:layout_height="1dp"
-                                                android:layout_weight="1" />
-                                        </LinearLayout>
-                                    </LinearLayout>
-
-                                    <LinearLayout
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:orientation="vertical"
-                                        android:layout_marginStart="2dp"
-                                        android:layout_marginEnd="2dp">
-
-                                        <TextView
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="Fast"
-                                            android:textSize="9sp" />
-
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:orientation="horizontal">
-
-                                            <Spinner
-                                                android:id="@+id/spinnerEasyFast"
-                                                android:layout_width="0dp"
-                                                android:layout_height="40dp"
-                                                android:layout_weight="1"
-                                                android:layout_marginEnd="1dp"
-                                                android:background="#111111" />
-
-                                            <Space
-                                                android:layout_width="0dp"
-                                                android:layout_height="1dp"
-                                                android:layout_weight="1" />
-                                        </LinearLayout>
-                                    </LinearLayout>
-
-                                    <LinearLayout
-                                        android:id="@+id/layoutEasyZ3"
-                                        android:layout_width="0dp"
-                                        android:layout_height="wrap_content"
-                                        android:layout_weight="1"
-                                        android:orientation="vertical"
-                                        android:layout_marginStart="2dp"
-                                        android:visibility="gone">
-
-                                        <TextView
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:text="Z3"
-                                            android:textSize="9sp" />
-
-                                        <LinearLayout
-                                            android:layout_width="match_parent"
-                                            android:layout_height="wrap_content"
-                                            android:orientation="horizontal">
-
-                                            <Spinner
-                                                android:id="@+id/spinnerEasyZ3"
-                                                android:layout_width="0dp"
-                                                android:layout_height="40dp"
-                                                android:layout_weight="1"
-                                                android:layout_marginEnd="1dp"
-                                                android:background="#111111" />
-
-                                            <Space
-                                                android:layout_width="0dp"
-                                                android:layout_height="1dp"
-                                                android:layout_weight="1" />
-                                        </LinearLayout>
-                                    </LinearLayout>
+                                    <Spinner
+                                        android:id="@+id/spinnerEasyZ3"
+                                        android:layout_width="80dp"
+                                        android:layout_height="32dp"
+                                        android:background="#111111" />
                                 </LinearLayout>
+
                             </LinearLayout>
+
+                            <!-- Options row: JIT + RTG (moved here from above image) -->
+                            <LinearLayout
+                                android:id="@+id/layoutEasyOptionsRow"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:paddingTop="2dp"
+                                android:paddingBottom="2dp"
+                                android:gravity="start|center_vertical">
+
+                                <CheckBox
+                                    android:id="@+id/chkEasyJit"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginEnd="12dp"
+                                    android:text="JIT"
+                                    android:textSize="10sp" />
+
+                                <CheckBox
+                                    android:id="@+id/chkEasyRtg"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="RTG"
+                                    android:textSize="10sp" />
+
+                            </LinearLayout>
+
+                            <!-- Game cover art (shown when DF0 has a game) -->
+                            <ImageView
+                                android:id="@+id/imgGameCover"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:maxHeight="120dp"
+                                android:scaleType="fitCenter"
+                                android:adjustViewBounds="true"
+                                android:contentDescription="Game cover"
+                                android:visibility="gone" />
+
                         </LinearLayout>
                     </ScrollView>
 
@@ -428,33 +379,69 @@
 
                     </LinearLayout>
 
-                    <!-- Amiga model image (long-press = config) -->
-                    <ImageView
-                        android:id="@+id/imgAmigaModel"
+                    <!-- Amiga model image: swipe left/right to change model -->
+                    <FrameLayout
+                        android:id="@+id/modelImageContainer"
                         android:layout_width="0dp"
                         android:layout_height="match_parent"
                         android:layout_weight="1.5"
-                        android:scaleType="fitCenter"
                         android:clickable="true"
-                        android:focusable="true"
-                        android:background="?android:attr/selectableItemBackground"
-                        android:contentDescription="Amiga model"
-                        android:src="@drawable/featured_a500" />
+                        android:focusable="true">
+
+                        <ImageView
+                            android:id="@+id/imgAmigaModel"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scaleType="fitCenter"
+                            android:clickable="true"
+                            android:focusable="true"
+                            android:contentDescription="Amiga model"
+                            android:src="@drawable/featured_a500" />
+
+                        <!-- Left arrow hint -->
+                        <TextView
+                            android:id="@+id/arrowLeft"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="start|center_vertical"
+                            android:text="◀"
+                            android:textSize="18sp"
+                            android:textColor="#80FFFFFF"
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp" />
+
+                        <!-- Right arrow hint -->
+                        <TextView
+                            android:id="@+id/arrowRight"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="end|center_vertical"
+                            android:text="▶"
+                            android:textSize="18sp"
+                            android:textColor="#80FFFFFF"
+                            android:paddingStart="2dp"
+                            android:paddingEnd="2dp" />
+
+                        <!-- Model name overlay -->
+                        <TextView
+                            android:id="@+id/txtModelName"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="bottom|center_horizontal"
+                            android:text="Amiga 500"
+                            android:textSize="11sp"
+                            android:textColor="#CCFFFFFF"
+                            android:background="#80000000"
+                            android:paddingStart="8dp"
+                            android:paddingEnd="8dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp" />
+
+                    </FrameLayout>
 
                 </LinearLayout>
 
-                <TextView
-                    android:id="@+id/txtInsertedMediaSummary"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Inserted: (none)"
-                    android:textSize="9sp"
-                    android:textColor="?android:attr/textColorSecondary"
-                    android:singleLine="true"
-                    android:ellipsize="end" />
-
-                <!-- DF0 status (clickable: tap to insert floppy) -->
+                <!-- DF0 status (hidden) -->
                 <TextView
                     android:id="@+id/txtDf0Status"
                     android:layout_width="match_parent"
@@ -468,23 +455,75 @@
                     android:textSize="10sp"
                     android:visibility="gone" />
 
-                <!-- DRIVES STRIP: individual icons for each active drive -->
-                <HorizontalScrollView
+                <!-- DRIVES STRIP: two horizontally-scrollable rows (DF row + DH row) -->
+                <LinearLayout
                     android:id="@+id/drivesStrip"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="1dp"
-                    android:scrollbars="none"
+                    android:orientation="vertical"
                     android:visibility="gone">
 
                     <LinearLayout
                         android:id="@+id/drivesStripContent"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+
+                </LinearLayout>
+
+                <!-- CD Panel: shown for CD32/CDTV instead of drives strip -->
+                <LinearLayout
+                    android:id="@+id/cdPanel"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:orientation="vertical"
+                    android:gravity="center_horizontal"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/txtCdDiscStatus"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="No disc loaded"
+                        android:textSize="11sp"
+                        android:textColor="#AAFFFFFF"
+                        android:gravity="center"
+                        android:ellipsize="middle"
+                        android:singleLine="true"
+                        android:paddingBottom="4dp" />
+
+                    <LinearLayout
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical" />
+                        android:gravity="center">
 
-                </HorizontalScrollView>
+                        <Button
+                            android:id="@+id/btnCdLoadDisc"
+                            android:layout_width="wrap_content"
+                            android:layout_height="42dp"
+                            android:text="\uD83D\uDCBF Load Disc"
+                            android:textSize="13sp"
+                            android:textColor="#FFFFFF"
+                            android:backgroundTint="#37474F"
+                            style="@style/QuickButtonPrimary" />
+
+                        <Button
+                            android:id="@+id/btnCdPlay"
+                            android:layout_width="wrap_content"
+                            android:layout_height="42dp"
+                            android:layout_marginStart="12dp"
+                            android:text="\u25B6 Play"
+                            android:textSize="13sp"
+                            android:textColor="#FFFFFF"
+                            android:backgroundTint="#2E7D32"
+                            style="@style/QuickButtonPrimary" />
+
+                    </LinearLayout>
+
+                </LinearLayout>
 
                 <!-- Ext ROM (CD32 only, shown at bottom of media section) -->
                 <LinearLayout

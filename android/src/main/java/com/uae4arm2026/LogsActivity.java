@@ -34,8 +34,13 @@ public class LogsActivity extends Activity {
             refreshLogs();
         });
 
+        Button close = new Button(this);
+        close.setText("Close");
+        close.setOnClickListener(v -> finish());
+
         actions.addView(refresh);
         actions.addView(clear);
+        actions.addView(close);
 
         ScrollView scroll = new ScrollView(this);
         logView = new TextView(this);

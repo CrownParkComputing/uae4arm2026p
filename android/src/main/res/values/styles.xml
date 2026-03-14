@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
+    <!-- Edge-to-edge fullscreen theme (replaces deprecated Theme.NoTitleBar.Fullscreen) -->
+    <style name="AppTheme.Fullscreen" parent="@android:style/Theme.NoTitleBar.Fullscreen">
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
     <!-- Compact UI controls for the Bootstrap/Quickstart screen. -->
     <style name="QuickButton" parent="@android:style/Widget.Button">
         <item name="android:minHeight">0dp</item>
