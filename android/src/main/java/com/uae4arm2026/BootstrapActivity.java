@@ -247,6 +247,7 @@ public class BootstrapActivity extends Activity {
     private View mEasyZ3Layout;
     private CheckBox mEasyJit;
     private CheckBox mEasyRtg;
+    private Button mBtnRendererToggle;
     private Spinner mEasyChip;
     private Spinner mEasyFast;
     private Spinner mEasyZ3;
@@ -270,6 +271,7 @@ public class BootstrapActivity extends Activity {
     private View mReturnBar;
     private View mBtnResumeToEmu;
     private View mBtnRestartEmu;
+    private android.widget.TextView mTxtRendererInfo;
     private boolean mLaunchedFromEmulatorMenu;
     private boolean mOpenMediaSwapperOnStart;
     private String mOpenMediaSectionOnStart;
@@ -5572,7 +5574,7 @@ public class BootstrapActivity extends Activity {
         rowTop.addView(topGroupGap);
 
         addDriveIcon(rowTop, lhaResId, "LHA", true, false, iconSizePx, 0,
-            v -> startActivity(new Intent(this, LhaLibraryActivity.class)), null, "(WHDLoad)");
+            v -> startActivity(new Intent(this, LhaLibraryActivity.class)), null, null);
 
         addDriveIcon(rowBottom, hdResId, "DH0", !agsAutoMountEnabled && isDhSlotEnabled(0), hasDhMedia(0), iconSizePx, 0,
             v -> onHardDriveSlotTapped(0), v -> { promptRemoveHardDrive(); return true; },
@@ -6572,6 +6574,28 @@ public class BootstrapActivity extends Activity {
         };
     }
 
+    private void initRendererToggleButton() {
+        if (mBtnRendererToggle == null) return;
+        SharedPreferences sp = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+        String backend = sp.getString(UaeOptionKeys.UAE_RENDERER_BACKEND, "opengl");
+        updateRendererButtonVisual(backend);
+
+        mBtnRendererToggle.setOnClickListener(v -> {
+            SharedPreferences prefs = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String cur = prefs.getString(UaeOptionKeys.UAE_RENDERER_BACKEND, "opengl");
+            String next = "vulkan".equals(cur) ? "opengl" : "vulkan";
+            prefs.edit().putString(UaeOptionKeys.UAE_RENDERER_BACKEND, next).commit();
+            updateRendererButtonVisual(next);
+        });
+    }
+
+    private void updateRendererButtonVisual(String backend) {
+        if (mBtnRendererToggle == null) return;
+        boolean vk = "vulkan".equals(backend);
+        mBtnRendererToggle.setText(vk ? "VK" : "GL");
+        mBtnRendererToggle.setBackgroundColor(vk ? 0xFFD32F2F : 0xFF0277BD);
+    }
+
     private void bindEasySetupControls() {
         if (mEasyChip != null) {
             mEasyChip.setAdapter(buildHighContrastSpinnerAdapter(EASY_CHIP_LABELS));
@@ -7031,6 +7055,55 @@ public class BootstrapActivity extends Activity {
         }
     }
 
+    private void populateRendererInfo() {
+        if (mTxtRendererInfo == null) return;
+        try {
+            String info = AmiberryActivity.nativeGetRendererDebugInfo();
+            if (info != null && !info.trim().isEmpty()) {
+                String api = extractInfoValue(info, "gfx_api");
+                String gpu = extractInfoValue(info, "vk.device_name");
+                if (gpu == null || gpu.isEmpty() || "n/a".equalsIgnoreCase(gpu)) {
+                    gpu = extractInfoValue(info, "gl.renderer");
+                }
+                StringBuilder label = new StringBuilder();
+                if (api != null && !api.isEmpty()) {
+                    if ("vulkan".equalsIgnoreCase(api)) label.append("Vulkan");
+                    else if ("opengl_es".equalsIgnoreCase(api)) label.append("OpenGL ES");
+                    else label.append(api);
+                }
+                if (gpu != null && !gpu.isEmpty() && !"n/a".equalsIgnoreCase(gpu)) {
+                    if (label.length() > 0) label.append(" \u2014 ");
+                    label.append(gpu);
+                }
+                if (label.length() > 0) {
+                    mTxtRendererInfo.setText(label.toString());
+                    mTxtRendererInfo.setVisibility(View.VISIBLE);
+                    return;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        // Fallback: read preference
+        try {
+            String backend = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                    .getString(UaeOptionKeys.UAE_RENDERER_BACKEND, "opengl");
+            mTxtRendererInfo.setText("vulkan".equalsIgnoreCase(backend) ? "Vulkan" : "OpenGL ES");
+            mTxtRendererInfo.setVisibility(View.VISIBLE);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static String extractInfoValue(String info, String key) {
+        if (info == null || key == null) return null;
+        String needle = key + "=";
+        for (String line : info.split("\\r?\\n")) {
+            if (line != null && line.trim().startsWith(needle)) {
+                return line.trim().substring(needle.length()).trim();
+            }
+        }
+        return null;
+    }
+
     private int resolveModelGraphicResId(String modelId) {
         String key = "featured_default";
         if (modelId != null) {
@@ -7207,6 +7280,7 @@ public class BootstrapActivity extends Activity {
         mReturnBar = findViewById(R.id.quickstartReturnBar);
         mBtnResumeToEmu = findViewById(R.id.btnResumeToEmu);
         mBtnRestartEmu = findViewById(R.id.btnRestartEmu);
+        mTxtRendererInfo = findViewById(R.id.txtRendererInfo);
 
         if (mReturnBar != null) {
             // In swapper-popup mode we don't show the return bar; the dialog has Cancel/Resume.
@@ -7216,6 +7290,10 @@ public class BootstrapActivity extends Activity {
                 // Return controls are only relevant when launched from emulator menu.
                 mReturnBar.setVisibility(mLaunchedFromEmulatorMenu ? View.VISIBLE : View.GONE);
             }
+        }
+
+        if (mTxtRendererInfo != null && mLaunchedFromEmulatorMenu) {
+            populateRendererInfo();
         }
 
         // Resume/Restart only make sense when invoked from the emulator overlay.
@@ -7328,6 +7406,11 @@ public class BootstrapActivity extends Activity {
         }
         mBtnCdCorner = findViewById(R.id.btnCdCorner);
 
+        View btnHelp = findViewById(R.id.btnHelp);
+        if (btnHelp != null) {
+            btnHelp.setOnClickListener(v -> startActivity(new android.content.Intent(this, HelpActivity.class)));
+        }
+
         // When invoked from the emulator MENU overlay, do not allow direct media edits in-place.
         // Users must intentionally open the separate Media Swapper UI.
         if (mLaunchedFromEmulatorMenu) {
@@ -7347,6 +7430,8 @@ public class BootstrapActivity extends Activity {
         mEasyZ3Layout = findViewById(R.id.layoutEasyZ3);
         mEasyJit = findViewById(R.id.chkEasyJit);
         mEasyRtg = findViewById(R.id.chkEasyRtg);
+        mBtnRendererToggle = findViewById(R.id.btnRendererToggle);
+        initRendererToggleButton();
         mEasyChip = findViewById(R.id.spinnerEasyChip);
         mEasyFast = findViewById(R.id.spinnerEasyFast);
         mEasyZ3 = findViewById(R.id.spinnerEasyZ3);

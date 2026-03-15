@@ -12,6 +12,7 @@ public final class UaeOptionKeys {
 
     // Android host-only UI options (not passed as UAE config keys).
     public static final String UAE_VIDEO_ASPECT_MODE = "uae_video_aspect_mode"; // int: 0=4:3, 1=16:9
+    public static final String UAE_RENDERER_BACKEND = "uae_renderer_backend"; // string: "opengl" or "vulkan"
 
     // Overrides
     public static final String UAE_OVERRIDE_CPUFPU = "uae_override_cpu_fpu"; // boolean

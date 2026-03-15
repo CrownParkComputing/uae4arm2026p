@@ -89,8 +89,15 @@ final class ConfigStorage {
         return false;
     }
 
+    /** Keys that live in SharedPreferences but must NOT be wiped by config load/save cycles. */
+    private static final java.util.Set<String> PERSIST_EXEMPT_KEYS = new java.util.HashSet<>(java.util.Arrays.asList(
+        UaeOptionKeys.UAE_RENDERER_BACKEND   // app-level renderer choice, not per-config
+    ));
+
     private static boolean shouldPersistKey(String k) {
-        return k != null && (k.startsWith(PREFIX_UAE) || k.startsWith(PREFIX_QS) || isBootstrapConfigKey(k));
+        if (k == null) return false;
+        if (PERSIST_EXEMPT_KEYS.contains(k)) return false;
+        return k.startsWith(PREFIX_UAE) || k.startsWith(PREFIX_QS) || isBootstrapConfigKey(k);
     }
 
     private static String readDecodedString(Map<String, String> loaded, String key) {

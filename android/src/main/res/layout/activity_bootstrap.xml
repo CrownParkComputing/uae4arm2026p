@@ -347,10 +347,36 @@
                                     android:id="@+id/chkEasyRtg"
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
+                                    android:layout_marginEnd="12dp"
                                     android:text="RTG"
                                     android:textSize="10sp" />
 
+                                <Button
+                                    android:id="@+id/btnRendererToggle"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="28dp"
+                                    android:minWidth="0dp"
+                                    android:minHeight="0dp"
+                                    android:paddingStart="10dp"
+                                    android:paddingEnd="10dp"
+                                    android:paddingTop="2dp"
+                                    android:paddingBottom="2dp"
+                                    android:text="GL"
+                                    android:textSize="10sp"
+                                    android:textColor="#FFFFFF"
+                                    android:background="#0277BD" />
+
                             </LinearLayout>
+
+                            <!-- Hint: longpress Amiga image to configure machine -->
+                            <TextView
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:text="Longpress Amiga to configure machine"
+                                android:textSize="8sp"
+                                android:textColor="#888888"
+                                android:paddingStart="4dp"
+                                android:paddingTop="1dp" />
 
                             <!-- Game cover art (shown when DF0 has a game) -->
                             <ImageView
@@ -434,6 +460,20 @@
                             android:background="#80000000"
                             android:paddingStart="8dp"
                             android:paddingEnd="8dp"
+                            android:paddingTop="2dp"
+                            android:paddingBottom="2dp" />
+
+                        <!-- Help hint overlay -->
+                        <TextView
+                            android:id="@+id/txtModelHelpHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_gravity="top|center_horizontal"
+                            android:text="Swipe to change model \u2022 Hold to configure"
+                            android:textSize="9sp"
+                            android:textColor="#99FFFFFF"
+                            android:paddingStart="6dp"
+                            android:paddingEnd="6dp"
                             android:paddingTop="2dp"
                             android:paddingBottom="2dp" />
 
@@ -546,31 +586,48 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="2dp"
-                android:orientation="horizontal"
+                android:orientation="vertical"
                 android:background="@drawable/bg_section_model"
                 android:padding="2dp"
                 android:visibility="visible">
 
-                <Button
-                    android:id="@+id/btnResumeToEmu"
-                    android:layout_width="0dp"
+                <TextView
+                    android:id="@+id/txtRendererInfo"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:backgroundTint="#2E7D32"
-                    android:textColor="#FFFFFF"
-                    style="@style/QuickButtonPrimary"
-                    android:text="Resume" />
+                    android:textSize="11sp"
+                    android:textColor="#AAAAAA"
+                    android:gravity="center"
+                    android:paddingBottom="2dp"
+                    android:visibility="gone" />
 
-                <Button
-                    android:id="@+id/btnRestartEmu"
-                    android:layout_width="0dp"
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="8dp"
-                    android:layout_weight="1"
-                    android:backgroundTint="#2E7D32"
-                    android:textColor="#FFFFFF"
-                    style="@style/QuickButtonPrimary"
-                    android:text="Restart" />
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btnResumeToEmu"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:backgroundTint="#2E7D32"
+                        android:textColor="#FFFFFF"
+                        style="@style/QuickButtonPrimary"
+                        android:text="Resume" />
+
+                    <Button
+                        android:id="@+id/btnRestartEmu"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="8dp"
+                        android:layout_weight="1"
+                        android:backgroundTint="#2E7D32"
+                        android:textColor="#FFFFFF"
+                        style="@style/QuickButtonPrimary"
+                        android:text="Restart" />
+
+                </LinearLayout>
 
             </LinearLayout>
 
@@ -599,4 +656,21 @@
         android:scaleType="centerCrop"
         android:visibility="gone"
         android:background="#000000" />
+
+    <TextView
+        android:id="@+id/btnHelp"
+        android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:layout_gravity="bottom|end"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="12dp"
+        android:gravity="center"
+        android:text="?"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:textColor="#CCFFFFFF"
+        android:background="@android:color/transparent"
+        android:clickable="true"
+        android:focusable="true" />
+
 </FrameLayout>

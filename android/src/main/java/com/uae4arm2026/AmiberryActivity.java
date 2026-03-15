@@ -199,7 +199,7 @@ public class AmiberryActivity extends SDLActivity {
     // If provided, this is preferred over prefs for cdimage0 mounting.
     public static final String EXTRA_CD_IMAGE0_FILE = "com.uae4arm2026.extra.CD_IMAGE0_FILE";
 
-    // Optional intent extras to force disk images for DF1–DF3.
+    // Optional intent extras to force disk images for DF1--DF3.
     public static final String EXTRA_DF1_DISK_FILE = "com.uae4arm2026.extra.DF1_DISK_FILE";
     public static final String EXTRA_DF2_DISK_FILE = "com.uae4arm2026.extra.DF2_DISK_FILE";
     public static final String EXTRA_DF3_DISK_FILE = "com.uae4arm2026.extra.DF3_DISK_FILE";
@@ -274,7 +274,7 @@ public class AmiberryActivity extends SDLActivity {
     private String mCdImagePath = null;
     private String mDf0SourceName = null;
 
-    // Optional DF1–DF3 disk images.
+    // Optional DF1--DF3 disk images.
     private String mDf1DiskImagePath = null;
     private String mDf2DiskImagePath = null;
     private String mDf3DiskImagePath = null;
@@ -546,6 +546,10 @@ public class AmiberryActivity extends SDLActivity {
     private VirtualJoystickOverlay mVirtualJoystick;
     private View mVkbdTouchInterceptor;
     private View mInEmuOverlay;
+    private AmiberryVirtualKeyboard mAndroidVkb;
+    private static final long OVERLAY_AUTO_HIDE_MS = 3000;
+    private final android.os.Handler mOverlayHideHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean mOverlayVisible = true;
     private int mVkbdForwardLogCount = 0;
     private int mVkbdProbeLogCount = 0;
     private long mTapDownTimeMs = 0;
@@ -691,13 +695,18 @@ public class AmiberryActivity extends SDLActivity {
             ensureDir(whdbootDir);
 
             logI("Copying boot-data.zip...");
-            copyAssetIfMissing("whdboot/boot-data.zip", new File(whdbootDir, "boot-data.zip"));
+            copyAsset("whdboot/boot-data.zip", new File(whdbootDir, "boot-data.zip"));
             logI("Copying WHDLoad...");
-            copyAssetIfMissing("whdboot/WHDLoad", new File(whdbootDir, "WHDLoad"));
+            copyAsset("whdboot/WHDLoad", new File(whdbootDir, "WHDLoad"));
             logI("Copying JST...");
-            copyAssetIfMissing("whdboot/JST", new File(whdbootDir, "JST"));
+            copyAsset("whdboot/JST", new File(whdbootDir, "JST"));
             logI("Copying AmiQuit...");
-            copyAssetIfMissing("whdboot/AmiQuit", new File(whdbootDir, "AmiQuit"));
+            copyAsset("whdboot/AmiQuit", new File(whdbootDir, "AmiQuit"));
+
+            // Delete previously extracted directories so the C++ WHDBooter
+            // re-extracts from the fresh boot-data.zip we just wrote.
+            deleteRecursive(new File(whdbootDir, "boot-data"));
+            deleteRecursive(new File(whdbootDir, "C"));
 
             // Optional DB (improves slave selection); copy only if present in assets.
             try {
@@ -815,446 +824,8 @@ public class AmiberryActivity extends SDLActivity {
         }
     }
 
-    private static boolean looksLikeRdbHardfile(String path) {
-        if (path == null || path.trim().isEmpty()) return false;
-        String p = path.trim();
+    // ── RDB / hardfile analysis ── see RdbHardfileDetector.java ─────
 
-        // Match Amiberry heuristics: scan a small header window only.
-        final int scanBlocks = 16;
-        final int blockSize = 512;
-
-        if (p.startsWith("content://")) {
-            try {
-                Context ctx = SDLActivity.getContext();
-                if (ctx == null) return false;
-                ContentResolver cr = ctx.getContentResolver();
-                Uri uri = Uri.parse(p);
-                try (ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r")) {
-                    if (pfd == null) return false;
-                    try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor())) {
-                        byte[] blk = new byte[blockSize];
-                        for (int i = 0; i < scanBlocks; i++) {
-                            int r = fis.read(blk);
-                            if (r < 4) return false;
-                            if (isRdbSignatureBlock(blk)) return true;
-                            if (r < blockSize) return false;
-                        }
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
-            return false;
-        }
-
-        File f = new File(p);
-        if (!f.exists() || !f.isFile() || f.length() < blockSize) return false;
-        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(f, "r")) {
-            byte[] blk = new byte[blockSize];
-            for (int i = 0; i < scanBlocks; i++) {
-                raf.seek((long) i * (long) blockSize);
-                int r = raf.read(blk);
-                if (r < 4) return false;
-                if (isRdbSignatureBlock(blk)) return true;
-                if (r < blockSize) return false;
-            }
-        } catch (Throwable ignored) {
-        }
-        return false;
-    }
-
-    private static boolean isRdbSignatureBlock(byte[] blk) {
-        if (blk == null || blk.length < 4) return false;
-        // ADIDE encoded "CPRM"
-        if ((blk[0] & 0xFF) == 0x39 && (blk[1] & 0xFF) == 0x10 && (blk[2] & 0xFF) == 0xD3 && (blk[3] & 0xFF) == 0x12) {
-            return true;
-        }
-        // A2090 BABE marker (seen with some controllers)
-        if ((blk[0] & 0xFF) == 0xBA && (blk[1] & 0xFF) == 0xBE) {
-            return true;
-        }
-        // Classic RDB signatures
-        return (blk[0] == 'R' && blk[1] == 'D' && blk[2] == 'S' && blk[3] == 'K')
-            || (blk[0] == 'D' && blk[1] == 'R' && blk[2] == 'K' && blk[3] == 'S')
-            || (blk[0] == 'C' && blk[1] == 'D' && blk[2] == 'S' && blk[3] == 'K');
-    }
-
-    private static final class RdbGeometry {
-        final int sectors;
-        final int heads;
-        final int reserved;
-        final int blocksize;
-
-        RdbGeometry(int sectors, int heads, int reserved, int blocksize) {
-            this.sectors = sectors;
-            this.heads = heads;
-            this.reserved = reserved;
-            this.blocksize = blocksize;
-        }
-    }
-
-    private static int readBeU16(byte[] b, int off) {
-        return ((b[off] & 0xff) << 8) | (b[off + 1] & 0xff);
-    }
-
-    private static long readBeU32(byte[] b, int off) {
-        return ((long) (b[off] & 0xff) << 24)
-            | ((long) (b[off + 1] & 0xff) << 16)
-            | ((long) (b[off + 2] & 0xff) << 8)
-            | ((long) (b[off + 3] & 0xff));
-    }
-
-    private static boolean isLikelyValidRdbBlock(byte[] blk) {
-        if (blk == null || blk.length < 512) return false;
-
-        // Must start with RDSK or CDSK.
-        boolean sig = (blk[0] == 'R' && blk[1] == 'D' && blk[2] == 'S' && blk[3] == 'K')
-            || (blk[0] == 'C' && blk[1] == 'D' && blk[2] == 'S' && blk[3] == 'K');
-        if (!sig) return false;
-
-        // RigidDiskBlock layout uses a size (in 32-bit longwords) at offset 0x04.
-        // Typical is 0x40 (64 longwords = 256 bytes). Accept a reasonable range.
-        long sizeLong = readBeU32(blk, 0x04);
-        if (sizeLong < 8 || sizeLong > 128) return false;
-        int sizeBytes = (int) (sizeLong * 4);
-        if (sizeBytes > 512) return false;
-
-        // Validate checksum: sum of all longwords in the block equals 0 (signed 32-bit wrap).
-        // This is a strong filter against accidental "RDSK" byte sequences in data.
-        int sum = 0;
-        for (int i = 0; i < sizeLong; i++) {
-            int lw = (int) readBeU32(blk, i * 4);
-            sum += lw;
-        }
-        if (sum != 0) return false;
-
-        // Basic sanity on blocksize.
-        int blocksize = (int) readBeU32(blk, 0x10);
-        if (blocksize <= 0) blocksize = 512;
-        if (!(blocksize == 512 || blocksize == 1024 || blocksize == 2048 || blocksize == 4096)) return false;
-
-        // Basic sanity on CHS fields.
-        int sectors = (int) readBeU32(blk, 0x44);
-        int heads = (int) readBeU32(blk, 0x48);
-        if (sectors <= 0 || heads <= 0 || sectors > 255 || heads > 255) {
-            // Some variants store as 16-bit; try that as a fallback.
-            sectors = readBeU16(blk, 0x44 + 2);
-            heads = readBeU16(blk, 0x48 + 2);
-        }
-        if (sectors <= 0 || heads <= 0 || sectors > 255 || heads > 255) return false;
-
-        return true;
-    }
-
-    private static RdbGeometry tryReadRdbGeometry(String path) {
-        if (path == null || path.trim().isEmpty()) return null;
-        String p = path.trim();
-
-        // Scan further than the classic "first 16 blocks" heuristic to avoid false negatives.
-        final int MAX_SCAN_BLOCKS = 2048;
-
-        if (p.startsWith("content://")) {
-            try {
-                Context ctx = SDLActivity.getContext();
-                if (ctx == null) return null;
-                ContentResolver cr = ctx.getContentResolver();
-                Uri uri = Uri.parse(p);
-
-                try (ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r")) {
-                    if (pfd == null) return null;
-                    try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor());
-                         FileChannel ch = fis.getChannel()) {
-                        long size = ch.size();
-                        if (size < 512) return null;
-
-                        byte[] blk = new byte[512];
-                        long maxBlocks = Math.min(MAX_SCAN_BLOCKS, Math.max(1, size / 512));
-                        ByteBuffer buf = ByteBuffer.wrap(blk);
-                        boolean found = false;
-                        for (int i = 0; i < maxBlocks; i++) {
-                            buf.clear();
-                            ch.position((long) i * 512L);
-                            int r = ch.read(buf);
-                            if (r < 76) continue;
-                            if (!isLikelyValidRdbBlock(blk)) continue;
-                            found = true;
-                            break;
-                        }
-                        if (!found) return null;
-
-                        int blocksize = (int) readBeU32(blk, 0x10);
-                        if (blocksize <= 0) blocksize = 512;
-
-                        int sectors = (int) readBeU32(blk, 0x44);
-                        int heads = (int) readBeU32(blk, 0x48);
-                        if (sectors <= 0 || heads <= 0) {
-                            sectors = readBeU16(blk, 0x44 + 2);
-                            heads = readBeU16(blk, 0x48 + 2);
-                        }
-                        if (sectors <= 0 || heads <= 0) return null;
-
-                        int reserved = 2;
-                        long partListBlock = readBeU32(blk, 0x1c);
-                        if (partListBlock > 0) {
-                            long partOffset = partListBlock * (long) blocksize;
-                            if (partOffset >= 0 && partOffset + 256 <= size) {
-                                byte[] part = new byte[Math.max(512, blocksize)];
-                                ByteBuffer pbuf = ByteBuffer.wrap(part);
-                                pbuf.clear();
-                                ch.position(partOffset);
-                                int pr = ch.read(pbuf);
-                                if (pr >= 160 && part[0] == 'P' && part[1] == 'A' && part[2] == 'R' && part[3] == 'T') {
-                                    long res = readBeU32(part, 128 + 6 * 4);
-                                    if (res >= 0 && res <= 1024) {
-                                        reserved = (int) res;
-                                    }
-                                }
-                            }
-                        }
-
-                        return new RdbGeometry(sectors, heads, reserved, blocksize);
-                    }
-                }
-            } catch (Throwable t) {
-                Log.w(TAG, "Unable to parse RDB geometry from HDF URI: " + t);
-                return null;
-            }
-        }
-
-        File f = new File(p);
-        if (!f.exists() || !f.isFile() || f.length() < 512) return null;
-
-        // RDSK layout reference (see filesys.cpp):
-        //  blocksize @ 0x10 (u32)
-        //  partlist   @ 0x1c (u32 block number)
-        //  cylinders  @ 0x40 (u32)
-        //  sectors    @ 0x44 (u32)
-        //  heads      @ 0x48 (u32)
-        // Partition env (PART, at +128): reserved @ (128 + 6*4)
-        try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
-            byte[] blk = new byte[512];
-            long maxBlocks = Math.min(MAX_SCAN_BLOCKS, Math.max(1, f.length() / 512));
-            boolean found = false;
-            for (int i = 0; i < maxBlocks; i++) {
-                raf.seek((long) i * 512L);
-                int r = raf.read(blk);
-                if (r < 76) continue;
-                if (!isLikelyValidRdbBlock(blk)) continue;
-                found = true;
-                break;
-            }
-            if (!found) return null;
-
-            int blocksize = (int) readBeU32(blk, 0x10);
-            if (blocksize <= 0) blocksize = 512;
-
-            int sectors = (int) readBeU32(blk, 0x44);
-            int heads = (int) readBeU32(blk, 0x48);
-            if (sectors <= 0 || heads <= 0) {
-                // Some variants store as 16-bit; try that as a fallback.
-                sectors = readBeU16(blk, 0x44 + 2);
-                heads = readBeU16(blk, 0x48 + 2);
-            }
-            if (sectors <= 0 || heads <= 0) return null;
-
-            int reserved = 2;
-            long partListBlock = readBeU32(blk, 0x1c);
-            if (partListBlock > 0) {
-                long partOffset = partListBlock * (long) blocksize;
-                if (partOffset >= 0 && partOffset + 256 <= f.length()) {
-                    byte[] part = new byte[Math.max(512, blocksize)];
-                    raf.seek(partOffset);
-                    int pr = raf.read(part);
-                    if (pr >= 160 && part[0] == 'P' && part[1] == 'A' && part[2] == 'R' && part[3] == 'T') {
-                        long res = readBeU32(part, 128 + 6 * 4);
-                        if (res >= 0 && res <= 1024) {
-                            reserved = (int) res;
-                        }
-                    }
-                }
-            }
-
-            return new RdbGeometry(sectors, heads, reserved, blocksize);
-        } catch (Throwable t) {
-            Log.w(TAG, "Unable to parse RDB geometry from HDF: " + t);
-            return null;
-        }
-    }
-
-    private static final class ChsGeometry {
-        final int sectors;
-        final int heads;
-
-        ChsGeometry(int sectors, int heads) {
-            this.sectors = sectors;
-            this.heads = heads;
-        }
-    }
-
-    private static ChsGeometry chooseChsGeometryForHardfile(String path, int blocksize) {
-        return chooseChsGeometryForHardfile(path, blocksize, 0);
-    }
-
-    private static ChsGeometry chooseChsGeometryForHardfile(String path, int blocksize, int reservedBlocks) {
-        String p = path;
-        long size = 0;
-        if (p != null && p.startsWith("content://")) {
-            try {
-                Context ctx = SDLActivity.getContext();
-                if (ctx != null) {
-                    ContentResolver cr = ctx.getContentResolver();
-                    Uri uri = Uri.parse(p);
-                    try (ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r")) {
-                        if (pfd != null) {
-                            try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor());
-                                 FileChannel ch = fis.getChannel()) {
-                                size = ch.size();
-                            }
-                        }
-                    }
-                }
-            } catch (Throwable ignored) {
-            }
-        } else {
-            File f = new File(path);
-            size = f.length();
-        }
-        if (blocksize <= 0) blocksize = 512;
-        long totalBlocks = (size > 0) ? (size / (long) blocksize) : 0;
-        if (reservedBlocks > 0 && reservedBlocks < totalBlocks) {
-            totalBlocks -= reservedBlocks;
-        }
-        if (totalBlocks <= 0) {
-            return new ChsGeometry(32, 16);
-        }
-
-        // Prefer common geometries that divide the image size exactly.
-        // (We want cylinders to be an integer and reasonably small.)
-        int[][] candidates = new int[][]{
-            // Common PC-ish geometries first.
-            {32, 16}, {32, 8}, {32, 4}, {32, 2}, {32, 1},
-            {63, 16}, {63, 8}, {63, 4}, {63, 2}, {63, 1},
-            {127, 16}, {127, 8}, {127, 4}, {127, 2}, {127, 1},
-
-            // More permissive fallbacks: improve odds of finding an exact divisor.
-            // (Some HDFs are sized in ways that don't divide the common geometries.)
-            {16, 16}, {16, 8}, {16, 4}, {16, 2}, {16, 1},
-            {8, 16}, {8, 8}, {8, 4}, {8, 2}, {8, 1},
-            {4, 16}, {4, 8}, {4, 4}, {4, 2}, {4, 1},
-            {2, 16}, {2, 8}, {2, 4}, {2, 2}, {2, 1},
-            {1, 16}, {1, 8}, {1, 4}, {1, 2}, {1, 1},
-        };
-
-        for (int[] c : candidates) {
-            int sectors = c[0];
-            int heads = c[1];
-            long spc = (long) sectors * (long) heads;
-            if (spc <= 0) continue;
-            if ((totalBlocks % spc) != 0) continue;
-            long cylinders = totalBlocks / spc;
-            if (cylinders >= 1 && cylinders <= 65535) {
-                return new ChsGeometry(sectors, heads);
-            }
-        }
-
-        // Fall back to a sensible default (may truncate a tiny remainder).
-        return new ChsGeometry(32, 16);
-    }
-
-    private static boolean isAmigaDosBootblockDostype(long dt) {
-        // AmigaDOS volumes use 'DOS\0'..'DOS\7' variants.
-        // Mask low byte which carries flags/version.
-        return (dt & 0xFFFFFF00L) == 0x444F5300L; // 'D''O''S'\0
-    }
-
-    private static int findAmigaDosBootblockOffsetBlocks(String path, int maxBlocks, int blocksize) {
-        if (path == null || path.trim().isEmpty()) return -1;
-        if (maxBlocks <= 0) return -1;
-        if (blocksize <= 0) blocksize = 512;
-
-        String p = path.trim();
-        try {
-            if (p.startsWith("content://")) {
-                Context ctx = SDLActivity.getContext();
-                if (ctx == null) return -1;
-                ContentResolver cr = ctx.getContentResolver();
-                Uri uri = Uri.parse(p);
-                try (ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r")) {
-                    if (pfd == null) return -1;
-                    try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor());
-                         FileChannel ch = fis.getChannel()) {
-                        long size = 0;
-                        try { size = ch.size(); } catch (Throwable ignored) { }
-                        byte[] buf = new byte[4];
-                        ByteBuffer bb = ByteBuffer.wrap(buf);
-                        for (int i = 0; i < maxBlocks; i++) {
-                            long off = (long) i * (long) blocksize;
-                            if (size > 0 && off + 4 > size) break;
-                            bb.clear();
-                            ch.position(off);
-                            int r = ch.read(bb);
-                            if (r < 4) continue;
-                            long dt = readBeU32(buf, 0);
-                            if (isAmigaDosBootblockDostype(dt)) return i;
-                        }
-                    }
-                }
-                return -1;
-            }
-
-            File f = new File(p);
-            if (!f.exists() || !f.isFile()) return -1;
-            long size = f.length();
-            try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
-                byte[] buf = new byte[4];
-                for (int i = 0; i < maxBlocks; i++) {
-                    long off = (long) i * (long) blocksize;
-                    if (off + 4 > size) break;
-                    raf.seek(off);
-                    int r = raf.read(buf);
-                    if (r < 4) continue;
-                    long dt = readBeU32(buf, 0);
-                    if (isAmigaDosBootblockDostype(dt)) return i;
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return -1;
-    }
-
-    private static long readBootBlockDostype(String path) {
-        if (path == null || path.trim().isEmpty()) return 0;
-        String p = path.trim();
-
-        try {
-            byte[] buf = new byte[4];
-
-            if (p.startsWith("content://")) {
-                Context ctx = SDLActivity.getContext();
-                if (ctx == null) return 0;
-                ContentResolver cr = ctx.getContentResolver();
-                Uri uri = Uri.parse(p);
-                try (ParcelFileDescriptor pfd = cr.openFileDescriptor(uri, "r")) {
-                    if (pfd == null) return 0;
-                    try (FileInputStream fis = new FileInputStream(pfd.getFileDescriptor())) {
-                        int r = fis.read(buf);
-                        if (r < 4) return 0;
-                    }
-                }
-            } else {
-                File f = new File(p);
-                if (!f.exists() || !f.isFile() || f.length() < 4) return 0;
-                try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
-                    raf.seek(0);
-                    int r = raf.read(buf);
-                    if (r < 4) return 0;
-                }
-            }
-
-            return readBeU32(buf, 0);
-        } catch (Throwable t) {
-            return 0;
-        }
-    }
 
     private static String findFastFileSystemNearKickstart(String kickstartRomFile) {
         try {
@@ -1419,7 +990,7 @@ public class AmiberryActivity extends SDLActivity {
         // Minimal auto-detect: treat images with an RDB signature as RDB, otherwise raw hardfile.
         // Keep this conservative to avoid false positives (which can break non-RDB HDFs).
         final String originalPath = path.trim();
-        boolean rdb = looksLikeRdbHardfile(originalPath);
+        boolean rdb = RdbHardfileDetector.looksLikeRdbHardfile(originalPath);
 
         // If the path is a SAF content:// URI, translate it into a stable /proc/self/fd/<fd> path
         // and keep the fd open for the duration of the emulator run.
@@ -1489,34 +1060,7 @@ public class AmiberryActivity extends SDLActivity {
         return true;
     }
 
-    private static int probeReservedBlocksForDosBootblock(String path, int blocksize) {
-        // Only probe regular file paths. For SAF content:// URIs we can’t reliably RandomAccessFile.
-        if (path == null || path.trim().isEmpty()) return 0;
-        String p = path.trim();
-        if (p.startsWith("content://")) return 0;
 
-        try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(p, "r")) {
-            // DOS\0 magic (0x44 0x4F 0x53 0x00) commonly appears at the start of a bootblock.
-            if (hasDosMagicAt(raf, 0)) return 0;
-            long off2 = (long) blocksize * 2L;
-            if (hasDosMagicAt(raf, off2)) return 2;
-        } catch (Throwable t) {
-            logI("Reserved-block probe failed for " + p + ": " + t);
-        }
-        return 0;
-    }
-
-    private static boolean hasDosMagicAt(java.io.RandomAccessFile raf, long offset) throws java.io.IOException {
-        if (raf == null) return false;
-        if (offset < 0) return false;
-        if (offset + 4 > raf.length()) return false;
-        raf.seek(offset);
-        int b0 = raf.read();
-        int b1 = raf.read();
-        int b2 = raf.read();
-        int b3 = raf.read();
-        return b0 == 'D' && b1 == 'O' && b2 == 'S' && b3 == 0;
-    }
 
     private static void addFilesystem2FromPrefs(
         List<String> args,
@@ -2120,207 +1664,8 @@ public class AmiberryActivity extends SDLActivity {
         addSettingArg(args, "cpu_compatible", "true");
     }
 
-    private static String joyEventForAction(int port, String action, boolean mouseMode) {
-        if (action == null || action.trim().isEmpty()) return null;
-        String keyboardEvent = keyboardEventForAction(action);
-        if (keyboardEvent != null) return keyboardEvent;
-        // Amiberry's find_inputevent() matches against the display name defined
-        // in inputevents.def (e.g. "Joy1 Up", "Joy1 Fire/Mouse1 Left Button").
-        // Port 0 = joyport0 = Joy1 in Amiberry; Port 1 = joyport1 = Joy2.
-        final String jn = (port == 0) ? "Joy1" : "Joy2";
-        final String mn = (port == 0) ? "Mouse1" : "Mouse2";
-        switch (action.trim().toUpperCase()) {
-            case "MOUSE_UP":            return mn + " Up";
-            case "MOUSE_DOWN":          return mn + " Down";
-            case "MOUSE_LEFT":          return mn + " Left";
-            case "MOUSE_RIGHT":         return mn + " Right";
-            case "MOUSE_LEFT_BUTTON":   return mn + " Left Button";
-            case "MOUSE_RIGHT_BUTTON":  return mn + " Right Button";
-            case "MOUSE_MIDDLE_BUTTON": return mn + " Middle Button";
-            default: break;
-        }
-        if (mouseMode) {
-            switch (action.trim().toUpperCase()) {
-                case "UP":          return mn + " Up";
-                case "DOWN":        return mn + " Down";
-                case "LEFT":        return mn + " Left";
-                case "RIGHT":       return mn + " Right";
-                case "FIRE1":       return mn + " Left Button";
-                case "FIRE2":       return mn + " Right Button";
-                case "FIRE3":       return mn + " Middle Button";
-                default: return null;
-            }
-        }
-        switch (action.trim().toUpperCase()) {
-            case "UP":          return jn + " Up";
-            case "DOWN":        return jn + " Down";
-            case "LEFT":        return jn + " Left";
-            case "RIGHT":       return jn + " Right";
-            case "FIRE1":       return jn + " Fire/" + mn + " Left Button";
-            case "FIRE2":       return jn + " 2nd Button/" + mn + " Right Button";
-            case "FIRE3":       return jn + " 3rd Button/" + mn + " Middle Button";
-            case "CD32_RED":    return jn + " CD32 Red";
-            case "CD32_BLUE":   return jn + " CD32 Blue";
-            case "CD32_GREEN":  return jn + " CD32 Green";
-            case "CD32_YELLOW": return jn + " CD32 Yellow";
-            case "CD32_PLAY":   return jn + " CD32 Play";
-            case "CD32_RWD":    return jn + " CD32 RWD";
-            case "CD32_FFW":    return jn + " CD32 FFW";
-            default: return null;
-        }
-    }
+    // ── Joystick event mapping ── see JoystickEventMapper.java ─────
 
-    private static String keyboardEventForAction(String action) {
-        if (action == null || action.trim().isEmpty()) return null;
-        switch (action.trim().toUpperCase()) {
-            case "KEY_SPACE": return "Space";
-            case "KEY_RETURN": return "Return";
-            case "KEY_ESC": return "ESC";
-            case "KEY_TAB": return "Tab";
-            case "KEY_BACKSPACE": return "Backspace";
-            case "KEY_DEL": return "Del";
-            case "KEY_CURSOR_UP": return "Cursor Up";
-            case "KEY_CURSOR_DOWN": return "Cursor Down";
-            case "KEY_CURSOR_LEFT": return "Cursor Left";
-            case "KEY_CURSOR_RIGHT": return "Cursor Right";
-            case "KEY_F1": return "F1";
-            case "KEY_F2": return "F2";
-            case "KEY_F3": return "F3";
-            case "KEY_F4": return "F4";
-            case "KEY_F5": return "F5";
-            case "KEY_F6": return "F6";
-            case "KEY_F7": return "F7";
-            case "KEY_F8": return "F8";
-            case "KEY_F9": return "F9";
-            case "KEY_F10": return "F10";
-            case "KEY_A": return "A";
-            case "KEY_B": return "B";
-            case "KEY_C": return "C";
-            case "KEY_D": return "D";
-            case "KEY_E": return "E";
-            case "KEY_F": return "F";
-            case "KEY_G": return "G";
-            case "KEY_H": return "H";
-            case "KEY_I": return "I";
-            case "KEY_J": return "J";
-            case "KEY_K": return "K";
-            case "KEY_L": return "L";
-            case "KEY_M": return "M";
-            case "KEY_N": return "N";
-            case "KEY_O": return "O";
-            case "KEY_P": return "P";
-            case "KEY_Q": return "Q";
-            case "KEY_R": return "R";
-            case "KEY_S": return "S";
-            case "KEY_T": return "T";
-            case "KEY_U": return "U";
-            case "KEY_V": return "V";
-            case "KEY_W": return "W";
-            case "KEY_X": return "X";
-            case "KEY_Y": return "Y";
-            case "KEY_Z": return "Z";
-            case "KEY_0": return "0";
-            case "KEY_1": return "1";
-            case "KEY_2": return "2";
-            case "KEY_3": return "3";
-            case "KEY_4": return "4";
-            case "KEY_5": return "5";
-            case "KEY_6": return "6";
-            case "KEY_7": return "7";
-            case "KEY_8": return "8";
-            case "KEY_9": return "9";
-            default: return null;
-        }
-    }
-
-    private static void addJoyMappingOption(List<String> args, int port, String buttonSuffix, String actionValue, boolean mouseMode) {
-        String eventName = joyEventForAction(port, actionValue, mouseMode);
-        if (eventName == null) return;
-        String opt = "joyport" + port + "_amiberry_custom_none_" + buttonSuffix + "=" + eventName;
-        Log.i(TAG, "Joy map arg: -s " + opt);
-        args.add("-s");
-        args.add(opt);
-    }
-
-    private static void addAndroidJoyMappingsFromPrefs(List<String> args,
-                                                       SharedPreferences globalPrefs,
-                                                       SharedPreferences perGamePrefs,
-                                                       String gameId) {
-        // Read effective per-button mappings (per-game override → global fallback).
-        String mapA     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_A);
-        String mapB     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_B);
-        String mapX     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_X);
-        String mapY     = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_Y);
-        String mapL1    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_L1);
-        String mapR1    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_R1);
-        String mapBack  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_BACK);
-        String mapStart = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_START);
-        String mapDpadUp    = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_UP);
-        String mapDpadDown  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_DOWN);
-        String mapDpadLeft  = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_LEFT);
-        String mapDpadRight = JoyMappingActivity.getEffectiveMapping(globalPrefs, perGamePrefs, gameId, UaeOptionKeys.UAE_INPUT_MAP_BTN_DPAD_RIGHT);
-
-        if (gameId != null) {
-            Log.i(TAG, "Joy mapping: using per-game overrides for \"" + gameId + "\"");
-        }
-
-        boolean controllerMouseRemap = false;
-        try {
-            controllerMouseRemap = globalPrefs.getBoolean(UaeOptionKeys.UAE_INPUT_CONTROLLER_MOUSE_REMAP, false);
-        } catch (Throwable ignored) {
-        }
-
-        java.util.ArrayList<Integer> targetPorts = new java.util.ArrayList<>();
-        java.util.HashSet<Integer> mousePorts = new java.util.HashSet<>();
-        try {
-            String p0 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT0_MODE, "mouse");
-            if (p0 != null && p0.trim().equalsIgnoreCase("mouse")) {
-                mousePorts.add(0);
-            }
-            if (p0 != null && p0.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
-                targetPorts.add(0);
-            }
-        } catch (Throwable ignored) {
-        }
-        try {
-            String p1 = globalPrefs.getString(UaeOptionKeys.UAE_INPUT_PORT1_MODE, "joy0");
-            if (p1 != null && p1.trim().equalsIgnoreCase("mouse")) {
-                mousePorts.add(1);
-            }
-            if (p1 != null && p1.trim().toLowerCase(java.util.Locale.ROOT).startsWith("joy")) {
-                targetPorts.add(1);
-            }
-        } catch (Throwable ignored) {
-        }
-
-        if (controllerMouseRemap) {
-            for (Integer mp : mousePorts) {
-                if (mp != null && !targetPorts.contains(mp)) {
-                    targetPorts.add(mp);
-                }
-            }
-        }
-
-        if (targetPorts.isEmpty()) {
-            targetPorts.add(1);
-        }
-
-        for (int port : targetPorts) {
-            boolean mouseMode = controllerMouseRemap && mousePorts.contains(port);
-            addJoyMappingOption(args, port, "a", mapA, mouseMode);
-            addJoyMappingOption(args, port, "b", mapB, mouseMode);
-            addJoyMappingOption(args, port, "x", mapX, mouseMode);
-            addJoyMappingOption(args, port, "y", mapY, mouseMode);
-            addJoyMappingOption(args, port, "leftshoulder", mapL1, mouseMode);
-            addJoyMappingOption(args, port, "rightshoulder", mapR1, mouseMode);
-            addJoyMappingOption(args, port, "back", mapBack, mouseMode);
-            addJoyMappingOption(args, port, "start", mapStart, mouseMode);
-            addJoyMappingOption(args, port, "dpup", mapDpadUp, mouseMode);
-            addJoyMappingOption(args, port, "dpdown", mapDpadDown, mouseMode);
-            addJoyMappingOption(args, port, "dpleft", mapDpadLeft, mouseMode);
-            addJoyMappingOption(args, port, "dpright", mapDpadRight, mouseMode);
-        }
-    }
 
     private File getExternalKickstartFile() {
         File root = Environment.getExternalStorageDirectory();
@@ -2405,6 +1750,10 @@ public class AmiberryActivity extends SDLActivity {
         if (destFile.exists() && destFile.length() > 0) {
             return true;
         }
+        return copyAsset(assetPath, destFile);
+    }
+
+    private boolean copyAsset(String assetPath, File destFile) {
         ensureDir(destFile.getParentFile());
         AssetManager am = getAssets();
         try (InputStream in = am.open(assetPath); FileOutputStream out = new FileOutputStream(destFile)) {
@@ -2416,10 +1765,20 @@ public class AmiberryActivity extends SDLActivity {
             out.flush();
             return true;
         } catch (IOException e) {
-            // Asset not present or copy failed.
             android.util.Log.w(TAG, "Unable to copy asset " + assetPath + " to " + destFile + ": " + e.getMessage());
             return false;
         }
+    }
+
+    private static void deleteRecursive(File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File c : children) deleteRecursive(c);
+            }
+        }
+        f.delete();
     }
 
     private void provisionArosRomsIfPossible() {
@@ -2560,6 +1919,64 @@ public class AmiberryActivity extends SDLActivity {
         b.setBackground(bg);
     }
 
+    /** Populate the renderer info label in the hamburger overlay menu. */
+    private void populateRendererOverlay(TextView tv) {
+        if (tv == null) return;
+
+        String apiLabel = null;
+        String gpuName = null;
+
+        // Primary: use the lighter nativeGetRendererBackend(), which just reads an atomic.
+        try {
+            int backend = nativeGetRendererBackend();
+            apiLabel = (backend == 1) ? "Vulkan" : "OpenGL ES";
+        } catch (Throwable t) {
+            Log.w(TAG, "nativeGetRendererBackend failed: " + t);
+        }
+
+        // Get GPU device name from cached value (lightweight, no temp VkInstance)
+        try {
+            String gpu = nativeGetGpuDeviceName();
+            if (gpu != null && !gpu.isEmpty()) {
+                gpuName = gpu;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "nativeGetGpuDeviceName failed: " + t);
+        }
+
+        // Fallback: read preference
+        if (apiLabel == null) {
+            try {
+                String backend = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE)
+                        .getString(UaeOptionKeys.UAE_RENDERER_BACKEND, "opengl");
+                apiLabel = "vulkan".equalsIgnoreCase(backend) ? "Vulkan" : "OpenGL ES";
+            } catch (Throwable t) {
+                Log.w(TAG, "prefs fallback for renderer overlay failed: " + t);
+            }
+        }
+
+        if (apiLabel == null) apiLabel = "Renderer";
+
+        StringBuilder label = new StringBuilder(apiLabel);
+        if (gpuName != null) {
+            label.append(" \u2014 ");
+            label.append(gpuName);
+        }
+        tv.setText(label.toString());
+        tv.setVisibility(View.VISIBLE);
+    }
+
+    private static String extractOverlayInfoValue(String info, String key) {
+        if (info == null || key == null) return null;
+        String needle = key + "=";
+        for (String line : info.split("\\r?\\n")) {
+            if (line != null && line.trim().startsWith(needle)) {
+                return line.trim().substring(needle.length()).trim();
+            }
+        }
+        return null;
+    }
+
     private static int normalizeVideoAspectMode(int mode) {
         return mode == 0 ? 0 : 1;
     }
@@ -2612,7 +2029,7 @@ public class AmiberryActivity extends SDLActivity {
 
     private void updateVirtualJoystickButtonLabel(Button button, boolean enabled) {
         if (button == null) return;
-        button.setText("🕹");
+        button.setText("\uD83D\uDD79");
         button.setAlpha(enabled ? 1.0f : 0.55f);
     }
 
@@ -2739,7 +2156,7 @@ public class AmiberryActivity extends SDLActivity {
 
     private void updateFloppySoundButtonLabel(Button button, boolean enabled) {
         if (button == null) return;
-        button.setText(enabled ? "🔊" : "🔇");
+        button.setText(enabled ? "\uD83D\uDD0A" : "\uD83D\uDD07");
     }
 
     private void showFloppySoundDialog(Button btnFloppySoundQuick) {
@@ -2867,13 +2284,13 @@ public class AmiberryActivity extends SDLActivity {
 
         // Hamburger button - positioned at bottom-left
         final Button btnHamburger = new Button(this);
-        btnHamburger.setText("☰");
+        btnHamburger.setText("\u2630");
         styleOverlayButton(btnHamburger);
         btnHamburger.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 18);
         btnHamburger.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
 
         final Button btnKeyboard = new Button(this);
-        btnKeyboard.setText("⌨");
+        btnKeyboard.setText("\u2328");
         styleOverlayButton(btnKeyboard);
         btnKeyboard.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 16);
         btnKeyboard.setPadding(btnPaddingH, btnPaddingV, btnPaddingH, btnPaddingV);
@@ -2903,25 +2320,29 @@ public class AmiberryActivity extends SDLActivity {
         menuTitle.setText("EMULATOR CONTROLS");
         menuTitle.setTextColor(0xFF4CAF50);
         menuTitle.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
-        menuTitle.setPadding(0, 0, 0, (int)(12*d));
+        menuTitle.setPadding(0, 0, 0, 0);
         menuTitle.setGravity(android.view.Gravity.CENTER);
 
+        // Renderer / driver info line (shown below the title)
+        final TextView txtRendererOverlay = new TextView(this);
+        txtRendererOverlay.setTextColor(0xFFAAAAAA);
+        txtRendererOverlay.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11);
+        txtRendererOverlay.setPadding(0, 0, 0, (int)(10*d));
+        txtRendererOverlay.setGravity(android.view.Gravity.CENTER);
+        txtRendererOverlay.setVisibility(View.GONE);
+
         // Create larger styled menu buttons with color coding
-        final Button btnMenu = createMenuButton("📋  Menu", d, 0xFF1565C0);      // Blue
-        final Button btnStates = createMenuButton("💿  Save States", d, 0xFFF57C00); // Orange
-        final Button btnInputMap = createMenuButton("🎮  Input Mapping", d, 0xFF2E7D32); // Green
-        final Button btnReset = createMenuButton("🔄  Soft Reset", d, 0xFFC62828);    // Red
-        final Button btnRestart = createMenuButton("🔁  Cold Restart", d, 0xFF7B1FA2); // Deep purple
+        final Button btnMenu = createMenuButton("Menu", d, 0xFF1565C0);      // Blue
+        final Button btnInputMap = createMenuButton("Input Mapping", d, 0xFF2E7D32); // Green
+        final Button btnRestart = createMenuButton("Cold Restart", d, 0xFF7B1FA2); // Deep purple
+        final Button btnAspectMenu = createMenuButton("Aspect Ratio", d, 0xFF00838F); // Teal
+        final Button btnSoundMenu = createMenuButton("Sound", d, 0xFF5D4037);    // Brown
         int runtimeAspectMode = getSavedVideoAspectMode();
         try {
             runtimeAspectMode = normalizeVideoAspectMode(nativeGetVideoAspectMode());
         } catch (Throwable ignored) {}
 
-        final Button btnAspectQuick = new Button(this);
-        styleOverlayButton(btnAspectQuick);
-        btnAspectQuick.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13);
-        btnAspectQuick.setPadding((int) (12 * d), (int) (6 * d), (int) (12 * d), (int) (6 * d));
-        updateAspectButtonLabel(btnAspectQuick, runtimeAspectMode);
+
 
         final Button btnWhdLhaQuick = new Button(this);
         styleOverlayButton(btnWhdLhaQuick);
@@ -2937,11 +2358,7 @@ public class AmiberryActivity extends SDLActivity {
         btnHdQuick.setPadding((int) (12 * d), (int) (6 * d), (int) (12 * d), (int) (6 * d));
         btnHdQuick.setVisibility(View.GONE);
 
-        final Button btnFloppySoundQuick = new Button(this);
-        styleOverlayButton(btnFloppySoundQuick);
-        btnFloppySoundQuick.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 13);
-        btnFloppySoundQuick.setPadding((int) (12 * d), (int) (6 * d), (int) (12 * d), (int) (6 * d));
-        updateFloppySoundButtonLabel(btnFloppySoundQuick, getFloppySoundEnabledPref());
+
 
         // RTG status row
         final LinearLayout rtgRow = new LinearLayout(this);
@@ -2960,17 +2377,7 @@ public class AmiberryActivity extends SDLActivity {
         rtgIndicator.setBackground(rtgBg);
         rtgIndicator.setVisibility(View.GONE);
 
-        final TextView rendererIndicator = new TextView(this);
-        rendererIndicator.setText("DDG");
-        rendererIndicator.setTextColor(0xFFFFFFFF);
-        rendererIndicator.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12);
-        rendererIndicator.setPadding((int)(12*d), (int)(6*d), (int)(12*d), (int)(6*d));
-        android.graphics.drawable.GradientDrawable rendererBg = new android.graphics.drawable.GradientDrawable();
-        rendererBg.setColor(0xFF455A64);
-        rendererBg.setCornerRadius(8 * d);
-        rendererIndicator.setBackground(rendererBg);
-        rendererIndicator.setVisibility(View.VISIBLE);
-        rendererIndicator.setOnClickListener(v -> showRendererInfoDialog());
+
 
         final TextView df0Indicator = new TextView(this);
         df0Indicator.setText("DF0");
@@ -3035,18 +2442,7 @@ public class AmiberryActivity extends SDLActivity {
         );
         lpIndicator3.leftMargin = (int)(8*d);
         rtgRow.addView(df3Indicator, lpIndicator3);
-        android.widget.LinearLayout.LayoutParams lpSoundQuick = new android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-        lpSoundQuick.leftMargin = (int)(8*d);
-        rtgRow.addView(btnFloppySoundQuick, lpSoundQuick);
-        android.widget.LinearLayout.LayoutParams lpAspectQuick = new android.widget.LinearLayout.LayoutParams(
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-            android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
-        );
-        lpAspectQuick.leftMargin = (int)(8*d);
-        rtgRow.addView(btnAspectQuick, lpAspectQuick);
+
         android.widget.LinearLayout.LayoutParams lpWhdQuick = new android.widget.LinearLayout.LayoutParams(
             android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
             android.widget.LinearLayout.LayoutParams.WRAP_CONTENT
@@ -3062,15 +2458,16 @@ public class AmiberryActivity extends SDLActivity {
 
         // Build menu panel
         menuPanel.addView(menuTitle);
+        menuPanel.addView(txtRendererOverlay);
         LinearLayout.LayoutParams lpBtn = new LinearLayout.LayoutParams(
             LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT
         );
         lpBtn.topMargin = gap;
         menuPanel.addView(btnMenu, lpBtn);
-        menuPanel.addView(btnStates, lpBtn);
         menuPanel.addView(btnInputMap, lpBtn);
-        menuPanel.addView(btnReset, lpBtn);
+        menuPanel.addView(btnAspectMenu, lpBtn);
+        menuPanel.addView(btnSoundMenu, lpBtn);
         menuPanel.addView(btnRestart, lpBtn);
 
         // Position hamburger at bottom-left
@@ -3113,15 +2510,21 @@ public class AmiberryActivity extends SDLActivity {
         lpIndicators.rightMargin = marginH;
         overlay.addView(rtgRow, lpIndicators);
 
-        // Position renderer badge at top-left
-        final FrameLayout.LayoutParams lpRendererIndicator = new FrameLayout.LayoutParams(
+
+
+        // Renderer info label – visible directly on overlay (top-left)
+        final TextView txtRendererLabel = new TextView(this);
+        txtRendererLabel.setTextColor(0xCCCCCCCC);
+        txtRendererLabel.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 11);
+        txtRendererLabel.setShadowLayer(2f, 1f, 1f, 0xFF000000);
+        final FrameLayout.LayoutParams lpRendLabel = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.WRAP_CONTENT,
             FrameLayout.LayoutParams.WRAP_CONTENT
         );
-        lpRendererIndicator.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
-        lpRendererIndicator.topMargin = marginV;
-        lpRendererIndicator.leftMargin = marginH;
-        overlay.addView(rendererIndicator, lpRendererIndicator);
+        lpRendLabel.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+        lpRendLabel.leftMargin = marginH;
+        lpRendLabel.topMargin = marginV;
+        overlay.addView(txtRendererLabel, lpRendLabel);
 
         // Position menu panel in center
         final FrameLayout.LayoutParams lpMenu = new FrameLayout.LayoutParams(
@@ -3158,9 +2561,15 @@ public class AmiberryActivity extends SDLActivity {
                 lpIndicators.topMargin = marginV + insetTop;
                 lpIndicators.rightMargin = marginH + insetRight;
                 rtgRow.setLayoutParams(lpIndicators);
-                lpRendererIndicator.topMargin = marginV + insetTop;
-                lpRendererIndicator.leftMargin = marginH + insetLeft;
-                rendererIndicator.setLayoutParams(lpRendererIndicator);
+                lpRendLabel.leftMargin = marginH + insetLeft;
+                lpRendLabel.topMargin = marginV + insetTop;
+                txtRendererLabel.setLayoutParams(lpRendLabel);
+
+                // Also adjust VKB bottom padding for nav bar
+                if (mAndroidVkb != null) {
+                    mAndroidVkb.setPadding(0, 0, 0, insetBottom);
+                }
+
                 return insets;
             });
             overlay.requestApplyInsets();
@@ -3170,13 +2579,15 @@ public class AmiberryActivity extends SDLActivity {
         btnHamburger.setOnClickListener(v -> {
             if (menuPanel.getVisibility() == View.VISIBLE) {
                 menuPanel.setVisibility(View.GONE);
-                btnHamburger.setText("☰");
+                btnHamburger.setText("\u2630");
                 // Resume emulator when menu closes
                 mPausedByOverlay = false;
                 try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             } else {
                 menuPanel.setVisibility(View.VISIBLE);
-                btnHamburger.setText("✕");
+                btnHamburger.setText("\u2715");
+                // Populate renderer info each time the menu opens
+                populateRendererOverlay(txtRendererOverlay);
                 // Pause emulator when menu opens
                 mPausedByOverlay = true;
                 try { SDLActivity.nativePause(); } catch (Throwable ignored) {}
@@ -3186,7 +2597,7 @@ public class AmiberryActivity extends SDLActivity {
         // Menu button actions
         btnMenu.setOnClickListener(v -> {
             menuPanel.setVisibility(View.GONE);
-            btnHamburger.setText("☰");
+            btnHamburger.setText("\u2630");
             try {
                 Intent i = new Intent(this, BootstrapActivity.class);
                 i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
@@ -3203,63 +2614,29 @@ public class AmiberryActivity extends SDLActivity {
 
         btnKeyboard.setOnClickListener(v -> {
             try {
-                nativeToggleVkbd();
-                v.postDelayed(() -> {
-                    try {
-                        boolean active = nativeIsVkbdActive();
-                        if (active) {
-                            int currentAspect = 1;
-                            try {
-                                currentAspect = normalizeVideoAspectMode(nativeGetVideoAspectMode());
-                            } catch (Throwable ignored) {
-                                currentAspect = getSavedVideoAspectMode();
-                            }
-                            if (currentAspect == 0) {
-                                mAspectModeBeforeVkbd = 0;
-                                try {
-                                    nativeSetStretchToFill(true);
-                                    nativeSetVideoAspectMode(1);
-                                } catch (Throwable ignored) {
-                                }
-                                updateAspectButtonLabel(mAspectQuickButton, 1);
-                            }
-                        } else if (mAspectModeBeforeVkbd == 0) {
-                            try {
-                                nativeSetStretchToFill(false);
-                                nativeSetVideoAspectMode(0);
-                            } catch (Throwable ignored) {
-                            }
-                            updateAspectButtonLabel(mAspectQuickButton, 0);
-                            mAspectModeBeforeVkbd = -1;
-                        }
-
-                        if (active && mVkbdTouchInterceptor != null) {
-                            mVkbdTouchInterceptor.bringToFront();
-                        }
-                        if (mInEmuOverlay != null) {
-                            mInEmuOverlay.bringToFront();
-                        }
-                        Log.i(TAG, "VKBD toggle requested; active=" + active);
-                        android.widget.Toast.makeText(this,
-                            active ? "Virtual keyboard ON" : "Virtual keyboard OFF",
-                            android.widget.Toast.LENGTH_SHORT).show();
-                    } catch (Throwable ignored) {
+                if (mAndroidVkb != null) {
+                    mAndroidVkb.toggle();
+                    boolean active = mAndroidVkb.isActive();
+                    // Keep the overlay and VKB on top
+                    if (active) {
+                        mAndroidVkb.bringToFront();
                     }
-                }, 120);
+                    if (mInEmuOverlay != null) {
+                        mInEmuOverlay.bringToFront();
+                    }
+                    Log.i(TAG, "Android VKB toggle; active=" + active);
+                    android.widget.Toast.makeText(this,
+                        active ? "Virtual keyboard ON" : "Virtual keyboard OFF",
+                        android.widget.Toast.LENGTH_SHORT).show();
+                }
             } catch (Throwable t) {
                 Log.w(TAG, "Unable to toggle virtual keyboard: " + t);
             }
         });
 
-        btnStates.setOnClickListener(v -> {
-            menuPanel.setVisibility(View.GONE);
-            btnHamburger.setText("☰");
-            showSaveStateDialog();
-        });
-
         btnInputMap.setOnClickListener(v -> {
             menuPanel.setVisibility(View.GONE);
-            btnHamburger.setText("☰");
+            btnHamburger.setText("\u2630");
             mPausedByOverlay = false;
             try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             try {
@@ -3283,22 +2660,11 @@ public class AmiberryActivity extends SDLActivity {
                 android.widget.Toast.LENGTH_SHORT).show();
         });
 
-        btnReset.setOnClickListener(v -> {
-            menuPanel.setVisibility(View.GONE);
-            btnHamburger.setText("☰");
-            mPausedByOverlay = false;
-            try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
-            try {
-                applyRuntimeFloppyPathsAndReset();
-                android.widget.Toast.makeText(this, "Soft reset complete", android.widget.Toast.LENGTH_SHORT).show();
-            } catch (Throwable t) {
-                Log.w(TAG, "Unable to reset emulator: " + t);
-            }
-        });
+
 
         btnRestart.setOnClickListener(v -> {
             menuPanel.setVisibility(View.GONE);
-            btnHamburger.setText("☰");
+            btnHamburger.setText("\u2630");
             mPausedByOverlay = false;
             try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             try {
@@ -3309,17 +2675,28 @@ public class AmiberryActivity extends SDLActivity {
             }
         });
 
-        btnAspectQuick.setOnClickListener(v -> {
+        btnAspectMenu.setOnClickListener(v -> {
+            menuPanel.setVisibility(View.GONE);
+            btnHamburger.setText("\u2630");
+            mPausedByOverlay = false;
+            try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
             int current = getSavedVideoAspectMode();
             try {
                 current = normalizeVideoAspectMode(nativeGetVideoAspectMode());
             } catch (Throwable ignored) {}
             final int next = current == 0 ? 1 : 0;
             applyVideoAspectModeRuntime(next);
-            updateAspectButtonLabel(btnAspectQuick, next);
             android.widget.Toast.makeText(this,
                 next == 0 ? "Video aspect: 4:3" : "Video aspect: 16:9",
                 android.widget.Toast.LENGTH_SHORT).show();
+        });
+
+        btnSoundMenu.setOnClickListener(v -> {
+            menuPanel.setVisibility(View.GONE);
+            btnHamburger.setText("\u2630");
+            mPausedByOverlay = false;
+            try { SDLActivity.nativeResume(); } catch (Throwable ignored) {}
+            showFloppySoundDialog(null);
         });
 
         btnWhdLhaQuick.setOnLongClickListener(v -> {
@@ -3357,11 +2734,10 @@ public class AmiberryActivity extends SDLActivity {
         df2Indicator.setOnClickListener(v -> android.widget.Toast.makeText(this, "Long press DF for media selector", android.widget.Toast.LENGTH_SHORT).show());
         df3Indicator.setOnClickListener(v -> android.widget.Toast.makeText(this, "Long press DF for media selector", android.widget.Toast.LENGTH_SHORT).show());
 
-        btnFloppySoundQuick.setOnClickListener(v -> showFloppySoundDialog(btnFloppySoundQuick));
+
 
         // Store references
         mRtgIndicator = rtgIndicator;
-        mRendererIndicator = rendererIndicator;
         mDf0Indicator = df0Indicator;
         mDf1Indicator = df1Indicator;
         mDf2Indicator = df2Indicator;
@@ -3370,8 +2746,7 @@ public class AmiberryActivity extends SDLActivity {
         mDf1IndicatorBg = df1Bg;
         mDf2IndicatorBg = df2Bg;
         mDf3IndicatorBg = df3Bg;
-        mFloppySoundQuickButton = btnFloppySoundQuick;
-        mAspectQuickButton = btnAspectQuick;
+
         mWhdLhaQuickButton = btnWhdLhaQuick;
         mHdQuickButton = btnHdQuick;
         mMenuPanel = menuPanel;
@@ -3383,6 +2758,43 @@ public class AmiberryActivity extends SDLActivity {
         );
         mGuiLayer.addView(overlay, lpOverlay);
         mInEmuOverlay = overlay;
+
+        // Android View-based virtual keyboard (works with any renderer backend)
+        mAndroidVkb = new AmiberryVirtualKeyboard(this);
+        FrameLayout.LayoutParams lpVkb = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        lpVkb.gravity = android.view.Gravity.BOTTOM;
+        mGuiLayer.addView(mAndroidVkb, lpVkb);
+
+        // Auto-hide: fade out after timeout, fade in on touch
+        final Runnable hideOverlayRunnable = () -> {
+            if (menuPanel.getVisibility() == View.VISIBLE) return; // don't hide while menu open
+            mOverlayVisible = false;
+            overlay.animate().alpha(0f).setDuration(300).start();
+        };
+
+        // Touch anywhere on the GUI layer to show/reset overlay
+        mGuiLayer.setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_DOWN) {
+                if (!mOverlayVisible) {
+                    mOverlayVisible = true;
+                    overlay.animate().alpha(1f).setDuration(200).start();
+                }
+                // Refresh renderer label each time overlay is shown
+                populateRendererOverlay(txtRendererLabel);
+                mOverlayHideHandler.removeCallbacks(hideOverlayRunnable);
+                mOverlayHideHandler.postDelayed(hideOverlayRunnable, OVERLAY_AUTO_HIDE_MS);
+            }
+            return false; // pass touch through
+        });
+
+        // Schedule initial auto-hide
+        mOverlayVisible = true;
+        // Populate renderer label on first show
+        populateRendererOverlay(txtRendererLabel);
+        mOverlayHideHandler.postDelayed(hideOverlayRunnable, OVERLAY_AUTO_HIDE_MS);
     }
 
     private Button createMenuButton(String text, float d, int color) {
@@ -3402,9 +2814,17 @@ public class AmiberryActivity extends SDLActivity {
         return btn;
     }
 
+    private void setMenuButtonColor(Button btn, int color) {
+        float d = getResources().getDisplayMetrics().density;
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(color);
+        bg.setCornerRadius(12 * d);
+        btn.setBackground(bg);
+    }
+
     // References to status indicators for runtime updates
     private TextView mRtgIndicator;
-    private TextView mRendererIndicator;
+    private TextView mRendererIndicator; // no longer shown in overlay badge
     private TextView mLedIndicator;
     private TextView mDf0Indicator;
     private TextView mDf1Indicator;
@@ -3412,8 +2832,8 @@ public class AmiberryActivity extends SDLActivity {
     private TextView mDf3Indicator;
     private LinearLayout mMenuPanel;
     private Button mBtnHamburger;
-    private Button mFloppySoundQuickButton;
-    private Button mAspectQuickButton;
+    private Button mFloppySoundQuickButton; // no longer in overlay, kept for API compat
+    private Button mAspectQuickButton; // no longer in overlay, kept for API compat
     private Button mWhdLhaQuickButton;
     private Button mHdQuickButton;
     private int mAspectModeBeforeVkbd = -1;
@@ -3609,10 +3029,7 @@ public class AmiberryActivity extends SDLActivity {
         if (mHdQuickButton != null) {
             mHdQuickButton.setVisibility(View.GONE);
         }
-        if (mFloppySoundQuickButton != null) {
-            mFloppySoundQuickButton.setVisibility(isWHDLoadMode ? View.GONE : View.VISIBLE);
-            updateFloppySoundButtonLabel(mFloppySoundQuickButton, getFloppySoundEnabledPref());
-        }
+
 
         if (mDf0Indicator != null) mDf0Indicator.setVisibility((isWHDLoadMode || isCdOnlyMode) ? View.GONE : View.VISIBLE);
         if (mDf1Indicator != null) mDf1Indicator.setVisibility((!isWHDLoadMode && !isCdOnlyMode && hasMediaPath(mDf1DiskImagePath)) ? View.VISIBLE : View.GONE);
@@ -3626,7 +3043,7 @@ public class AmiberryActivity extends SDLActivity {
             mMenuPanel.setVisibility(View.GONE);
         }
         if (mBtnHamburger != null) {
-            mBtnHamburger.setText("☰");
+            mBtnHamburger.setText("\u2630");
         }
         try {
             Intent i = new Intent(this, BootstrapActivity.class);
@@ -3880,7 +3297,19 @@ public class AmiberryActivity extends SDLActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         requestWindowFeature(Window.FEATURE_NO_TITLE);
+
         super.onCreate(savedInstanceState);
+
+        // Set renderer backend AFTER super.onCreate() loads the native library,
+        // but BEFORE the SDL surface is ready (which triggers window creation).
+        try {
+            SharedPreferences sp = getSharedPreferences(UaeOptionKeys.PREFS_NAME, MODE_PRIVATE);
+            String backend = sp.getString(UaeOptionKeys.UAE_RENDERER_BACKEND, "opengl");
+            nativeSetRendererBackend("vulkan".equals(backend) ? 1 : 0);
+            Log.i(TAG, "Renderer backend set to: " + backend);
+        } catch (Throwable t) {
+            Log.w(TAG, "Unable to set renderer backend: " + t);
+        }
 
         // Ensure no "heading"/status bar and give SDL a full canvas.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
@@ -4302,6 +3731,11 @@ public class AmiberryActivity extends SDLActivity {
     public static native int nativeGetVideoAspectMode();
     public static native String nativeGetRendererDebugInfo();
 
+    // Renderer backend: 0 = OpenGL ES, 1 = Vulkan.
+    public static native void nativeSetRendererBackend(int backend);
+    public static native int nativeGetRendererBackend();
+    public static native String nativeGetGpuDeviceName();
+
     // Hot-swap a floppy image in the running emulator.
     // drive: 0 = DF0, 1 = DF1.
     public static native void nativeInsertFloppy(int drive, String path);
@@ -4311,6 +3745,9 @@ public class AmiberryActivity extends SDLActivity {
 
     // Reset the emulator (soft reset)
     public static native void nativeResetEmulator();
+
+    // Send an Amiga keycode directly. keycode = AK_* value, pressed = 1 (down) / 0 (up).
+    public static native void nativeSendAmigaKey(int keycode, int pressed);
 
     // Virtual Joystick injection.
     // axis: 0=horiz, 1=vert. value: -1, 0, 1.
@@ -4897,7 +4334,7 @@ public class AmiberryActivity extends SDLActivity {
             args.add("floppy_speed=" + v);
         }
 
-        // Input options — always emit joyport settings so WHDBooter gets the
+        // Input options â€” always emit joyport settings so WHDBooter gets the
         // user's chosen configuration (defaults: mouse for port 0, joy0 for port 1)
         {
             String source = p.getString(UaeOptionKeys.UAE_INPUT_CONTROLLER_SOURCE, "external");
@@ -4932,7 +4369,7 @@ public class AmiberryActivity extends SDLActivity {
         // Per-game overrides take priority over global defaults.
         SharedPreferences perGamePrefs = getSharedPreferences(JoyMappingActivity.PREFS_PER_GAME, MODE_PRIVATE);
         String gameId = getGameIdentifier();
-        addAndroidJoyMappingsFromPrefs(args, p, perGamePrefs, gameId);
+        JoystickEventMapper.addAndroidJoyMappingsFromPrefs(args, p, perGamePrefs, gameId);
 
         boolean agsAutoMountEnabled = p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_AUTOMOUNT_ENABLED, false)
             && p.getBoolean(UaeOptionKeys.UAE_DRIVE_AGS_LAUNCH_ONCE, false);
@@ -5238,7 +4675,7 @@ public class AmiberryActivity extends SDLActivity {
         }
 
         // RAM / Memory overrides
-        // Skip when WHDLoad autoload is active — WHDBooter sets the right memory config
+        // Skip when WHDLoad autoload is active â€” WHDBooter sets the right memory config
         boolean skipMemoryOverrides = (mWHDLoadFile != null && !mWHDLoadFile.isEmpty());
         if (!skipMemoryOverrides && p.contains(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE)) {
             int v = p.getInt(UaeOptionKeys.UAE_MEM_CHIPMEM_SIZE, 2);

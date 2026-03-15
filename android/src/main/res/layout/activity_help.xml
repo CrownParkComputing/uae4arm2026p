@@ -3,7 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:fillViewport="true"
-    android:background="#FF222222">
+    android:background="#FF1A1A2E">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -38,11 +38,10 @@
             android:textSize="13sp" />
 
         <TextView
-            android:id="@+id/txtAboutBody"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
-            android:text="Based on UAE4ARM and Amiberry.\nPorted to Android 2024-2026.\n\nFor documentation and support, visit the project GitHub."
+            android:text="Based on UAE4ARM and Amiberry.\nPorted to Android 2024-2026."
             android:textColor="#CCCCCC"
             android:textSize="12sp" />
 
@@ -53,49 +52,232 @@
             android:layout_marginBottom="16dp"
             android:background="#444444" />
 
-        <!-- Help Section -->
+        <!-- ═══ LAUNCHER GUIDE ═══ -->
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Launcher — Drive Icons"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="DF0 – DF3 — Floppy disk drives. Tap to select an ADF disk image.\n\nDH0 – DH6 — Hard drive slots. Tap to choose a folder or HDF image.\n\nLHA — WHDLoad game launcher. Tap to browse and launch LHA archives.\n\nCD — CD-ROM drive. Tap to select an ISO/CUE/BIN disc image.\n\nKickstart icon — Tap to select or change the Kickstart ROM file." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Launcher — Long Press"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="Long-press a DH slot — Prompts to remove / clear that hard drive.\n\nLong-press DF0 – DF3 — Prompts to eject that floppy disk." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Launcher — Model Strip"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="Model icons (A500, A1200, CD32…) — Tap to switch the emulated Amiga model. The Kickstart ROM is auto-selected to match.\n\nSwipe left/right — Scroll through available models." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Launcher — Other Controls"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="START button — Launches the emulator with your current configuration.\n\nConfigs button — Opens saved configuration profiles.\n\nADF Library (floppy icon) — Opens the full ADF disk image library for quick multi-disk management." />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:background="#444444" />
+
+        <!-- ═══ IN-EMULATOR GUIDE ═══ -->
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="In Emulator — Overlay Buttons"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#B0BEC5"
+            android:textSize="12sp"
+            android:textStyle="italic"
+            android:paddingBottom="8dp"
+            android:text="The overlay auto-hides after 3 seconds. Tap the screen to show it again." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="☰ Hamburger (bottom-left) — Opens the emulator controls menu.\n\n⌨ Keyboard (bottom-right) — Toggles the on-screen keyboard.\n\n🕹 Joystick (above keyboard) — Toggles the virtual joystick overlay on/off." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="In Emulator — Burger Menu"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="Menu — Opens the Amiberry GUI for full configuration.\n\nSave States — Save or load emulator snapshots.\n\nInput Mapping — Configure gamepad button-to-Amiga mappings.\n\nAspect Ratio — Cycle through display modes (Auto / 4:3 / Pixel-Perfect / Stretch).\n\nSound — Toggle audio on/off.\n\nRenderer Info — Shows the current graphics renderer.\n\nCold Restart — Full cold reboot of the emulated Amiga." />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="In Emulator — Status Indicators"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="RTG (green, top-right) — Shown when RTG (Picasso96) mode is active.\n\nDF0 (blue) — Floppy drive 0 is loaded.\n\nDF1 (orange) / DF2 / DF3 — Additional floppy drives loaded.\n\nLHA / HDF — Quick-access buttons for WHDLoad or hard drive media." />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:background="#444444" />
+
+        <!-- ═══ TIPS ═══ -->
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Tips"
+            android:textColor="#81C784"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:paddingBottom="8dp" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp"
+            android:text="• Use a Bluetooth or USB gamepad for the best experience. Button mappings can be configured globally or per-game via Input Mapping.\n\n• For CD32 games, select the CD32 model — both a Kickstart ROM and Extended ROM are needed.\n\n• The emulator supports save states — use them to save progress at any point.\n\n• WHDLoad games (LHA archives) are auto-configured for A1200 with appropriate settings.\n\n• If the screen looks stretched, use Aspect Ratio in the burger menu to switch to 4:3 or Pixel-Perfect mode." />
+
+        <View
+            android:layout_width="match_parent"
+            android:layout_height="1dp"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="16dp"
+            android:background="#444444" />
+
+        <!-- ═══ SETUP HELP ═══ -->
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Setup Help"
-            android:textColor="#FFFFFF"
-            android:textSize="20sp"
+            android:textColor="#81C784"
+            android:textSize="18sp"
             android:textStyle="bold"
-            android:paddingBottom="12dp" />
+            android:paddingBottom="8dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Kickstart ROMs"
-            android:textColor="#AAAAAA"
-            android:textSize="18sp"
+            android:textColor="#90CAF9"
+            android:textSize="15sp"
             android:textStyle="bold"
-            android:paddingBottom="8dp" />
+            android:paddingBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="To run Amiga models correctly, you need Kickstart ROM files.\n\n1. Place your .rom files in a folder on your device.\n2. Use the 'Paths' button to select your config/ROMs parent folder.\n3. Use 'Kickstart Map' to manually assign ROMs if they are not detected."
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:paddingBottom="24dp" />
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="Paths"
-            android:textColor="#AAAAAA"
-            android:textSize="18sp"
+            android:textColor="#90CAF9"
+            android:textSize="15sp"
             android:textStyle="bold"
-            android:paddingBottom="8dp" />
+            android:paddingBottom="4dp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="On newer Android versions, you must grant access to folders using the System File Picker (SAF).\n\n- Click 'Paths'.\n- Click 'Select Parent Folder'.\n- Choose a folder where you store Configs, ROMs, and Disks.\n\nThis ensures the emulator can save configurations and read your files."
-            android:textColor="#FFFFFF"
-            android:textSize="14sp"
-            android:paddingBottom="24dp" />
+            android:textColor="#E0E0E0"
+            android:textSize="13sp"
+            android:lineSpacingMultiplier="1.4"
+            android:paddingBottom="16dp" />
 
         <Button
             android:id="@+id/btnRerunWalkthrough"

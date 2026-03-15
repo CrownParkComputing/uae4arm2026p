@@ -307,18 +307,19 @@ static void ensure_boot_data_extracted()
 	if (std::filesystem::exists(c_dir) && std::filesystem::is_directory(c_dir)) {
 		write_log("WHDBooter - C directory exists, boot-data already extracted\n");
 		
-		// Ensure WHDLoad and JST are in C directory
+		// Always overwrite WHDLoad and JST in C directory from root copies
+		// so that APK updates are reflected immediately.
 		const auto whdload_root = whdbooter_path / "WHDLoad";
 		const auto whdload_c = c_dir / "WHDLoad";
 		const auto jst_root = whdbooter_path / "JST";
 		const auto jst_c = c_dir / "JST";
 		
 		try {
-			if (std::filesystem::exists(whdload_root) && !std::filesystem::exists(whdload_c)) {
+			if (std::filesystem::exists(whdload_root)) {
 				std::filesystem::copy_file(whdload_root, whdload_c, std::filesystem::copy_options::overwrite_existing);
 				write_log("WHDBooter - Copied WHDLoad to C directory\n");
 			}
-			if (std::filesystem::exists(jst_root) && !std::filesystem::exists(jst_c)) {
+			if (std::filesystem::exists(jst_root)) {
 				std::filesystem::copy_file(jst_root, jst_c, std::filesystem::copy_options::overwrite_existing);
 				write_log("WHDBooter - Copied JST to C directory\n");
 			}

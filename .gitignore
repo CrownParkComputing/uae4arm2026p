@@ -24,11 +24,16 @@ projects_stacktrace*.txt
 
 # Android local build output dumps
 android/gradle_assembleDebug.txt
+android/gradle_setup_build.txt
 android/last_build*.txt
+android/found_apks.txt
+android/device_bootstrap_prefs*.xml
 
 # Android local crash/logcat captures
 android/*logcat*.txt
 android/*crash*.txt
+android/*_logs.txt
+android/*_scan.txt
 android/*.txt
 *.log
 *.err.log

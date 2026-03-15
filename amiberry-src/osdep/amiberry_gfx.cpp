@@ -22,6 +22,7 @@
 #include <atomic>
 
 extern std::atomic<int> g_amiberry_android_video_aspect_mode;
+extern std::atomic<int> g_amiberry_android_renderer_backend;
 #endif
 
 #include "sysdeps.h"
@@ -59,6 +60,10 @@ extern std::atomic<int> g_amiberry_android_video_aspect_mode;
 #include <SDL_image.h>
 #endif
 #ifdef USE_OPENGL
+#ifdef __ANDROID__
+#include "gl_platform.h"
+#include "gles_renderer.h"
+#else
 #include <GL/glew.h>
 #include <SDL_opengl.h>
 
@@ -68,7 +73,12 @@ extern std::atomic<int> g_amiberry_android_video_aspect_mode;
 
 #define CRT_FRAME_IMPLEMENTATION
 #include "crt_frame.h"
+#endif // __ANDROID__
+#endif // USE_OPENGL
 
+#if defined(USE_VULKAN) && defined(__ANDROID__)
+#include <SDL_vulkan.h>
+#include "vk_renderer.h"
 #endif
 
 #ifdef WITH_MIDIEMU
@@ -87,11 +97,24 @@ SDL_Surface* amiga_surface = nullptr;
 
 #ifdef USE_OPENGL
 SDL_GLContext gl_context;
+#ifdef __ANDROID__
+static GlesRenderer g_gles_renderer;
+// Cached GL info strings — populated on emu thread, read from Java main thread.
+std::string g_cached_gl_renderer;
+std::string g_cached_gl_version;
+#if defined(USE_VULKAN)
+static VkRenderer g_vk_renderer;
+// Cached Vulkan device name — populated on emu thread.
+std::string g_cached_vk_device_name;
+#endif // USE_VULKAN
+#else
 crtemu_t* crtemu_tv = nullptr;
+static uae_u8* create_packed_pixel_buffer(const SDL_Surface* src, const SDL_Rect& crop, SDL_Rect& out_buffer_rect);
+#endif // __ANDROID__
 
 bool set_opengl_attributes();
 bool init_opengl_context(SDL_Window* window);
-static uae_u8* create_packed_pixel_buffer(const SDL_Surface* src, const SDL_Rect& crop, SDL_Rect& out_buffer_rect);
+#ifndef __ANDROID__
 static int get_crtemu_type(const char* shader)
 {
 	if (!shader) return CRTEMU_TYPE_TV;
@@ -102,6 +125,7 @@ static int get_crtemu_type(const char* shader)
 	if (!std::strcmp(shader, "none") || !std::strcmp(shader, "NONE"))   return CRTEMU_TYPE_NONE;
 	return CRTEMU_TYPE_TV;
 }
+#endif // !__ANDROID__
 #else
 SDL_Texture* amiga_texture;
 #endif
@@ -235,10 +259,19 @@ void set_scaling_option(const int monid, const uae_prefs* p, const int width, co
 
 #ifdef USE_OPENGL
 	const GLfloat filter = (strcmp(scale_quality, "linear") == 0) ? GL_LINEAR : GL_NEAREST;
+#ifdef __ANDROID__
+	if (g_gles_renderer.frame_tex) {
+		glBindTexture(GL_TEXTURE_2D, g_gles_renderer.frame_tex);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+		glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+#else
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
 	glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
 	// NOTE: OpenGL integer scaling would need to be handled in the shader or viewport calculations.
 	glBindTexture(GL_TEXTURE_2D, 0);
+#endif
 #else
 	#ifdef AMIBERRY_ANDROID
 	extern std::atomic<int> g_amiberry_android_stretch_to_fill;
@@ -268,7 +301,9 @@ static float SDL2_getrefreshrate(const int monid)
 }
 
 #ifdef USE_OPENGL
+#ifndef __ANDROID__
 static GLuint osd_texture = 0;
+#endif
 #endif
 static bool SDL2_alloctexture(int monid, int w, int h)
 {
@@ -276,6 +311,16 @@ static bool SDL2_alloctexture(int monid, int w, int h)
 		return false;
 #ifdef USE_OPENGL
 	write_log("DEBUG: SDL2_alloctexture called with w=%d, h=%d\n", w, h);
+#ifdef __ANDROID__
+#if defined(USE_VULKAN)
+	if (g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) == 1) {
+		vk_alloc_frame_texture(&g_vk_renderer, w, h);
+		return true;
+	}
+#endif
+	gles_alloc_frame_texture(&g_gles_renderer, w, h);
+	return true;
+#else
 	if (crtemu_tv) {
 		destroy_crtemu();
 		osd_texture = 0;
@@ -294,6 +339,7 @@ static bool SDL2_alloctexture(int monid, int w, int h)
 	if (crtemu_tv)
 		crtemu_frame(crtemu_tv, (CRTEMU_U32*)amiga_surface->pixels, w, h);
 	return crtemu_tv != nullptr;
+#endif // __ANDROID__
 #else
 	if (w < 0 || h < 0)
 	{
@@ -1575,10 +1621,107 @@ void show_screen(const int monid, int mode)
 		return;
 	}
 #ifdef USE_OPENGL
+	int drawableWidth, drawableHeight;
+
+#ifdef __ANDROID__
+	{
+		// One-shot diagnostic: confirm show_screen is reached and key state
+		static int s_show_screen_log_count = 0;
+		if (s_show_screen_log_count < 10) {
+			s_show_screen_log_count++;
+			__android_log_print(ANDROID_LOG_INFO, "SHOW_SCREEN",
+				"[%d/%d] mode=%d render_ok=%d surface=%p surface_wh=%dx%d crop={%d,%d,%d,%d} backend=%d",
+				s_show_screen_log_count, 10, mode, (int)mon->render_ok,
+				(void*)amiga_surface,
+				amiga_surface ? amiga_surface->w : -1,
+				amiga_surface ? amiga_surface->h : -1,
+				crop_rect.x, crop_rect.y, crop_rect.w, crop_rect.h,
+				g_amiberry_android_renderer_backend.load(std::memory_order_relaxed));
+		}
+	}
+
+	// ── Check if using Vulkan backend ──
+#if defined(USE_VULKAN)
+	if (g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) == 1) {
+		// ── Android Vulkan rendering path ──
+		extern std::atomic<int> g_amiberry_android_stretch_to_fill;
+		const bool stretchToFill = g_amiberry_android_stretch_to_fill.load(std::memory_order_relaxed) != 0;
+		const bool correctAspect = !mon->screen_is_picasso && currprefs.gfx_correct_aspect;
+
+		SDL_Vulkan_GetDrawableSize(mon->amiga_window, &drawableWidth, &drawableHeight);
+
+		{
+			static int s_vk_log = 0;
+			if (s_vk_log < 5) {
+				s_vk_log++;
+				__android_log_print(ANDROID_LOG_INFO, "SHOW_SCREEN",
+					"VK path: drawable=%dx%d frame_image=%p staging_mapped=%p staging_dirty=%d",
+					drawableWidth, drawableHeight,
+					(void*)g_vk_renderer.frame_image, g_vk_renderer.staging_mapped,
+					(int)g_vk_renderer.staging_dirty);
+			}
+		}
+
+		// Upload frame pixels to Vulkan texture
+		vk_upload_frame(&g_vk_renderer, amiga_surface, nullptr, 0, true);
+
+		// Draw frame with aspect preservation / stretch-to-fill
+		vk_draw_frame(&g_vk_renderer, drawableWidth, drawableHeight,
+		              &crop_rect, amiga_surface->w, amiga_surface->h,
+		              stretchToFill, correctAspect, amiberry_options.rotation_angle);
+	} else
+#endif // USE_VULKAN
+	// ── Android GLES3 rendering path ──
+	{
+		SDL_GL_GetDrawableSize(mon->amiga_window, &drawableWidth, &drawableHeight);
+		extern std::atomic<int> g_amiberry_android_stretch_to_fill;
+		const bool stretchToFill = g_amiberry_android_stretch_to_fill.load(std::memory_order_relaxed) != 0;
+		const bool correctAspect = !mon->screen_is_picasso && currprefs.gfx_correct_aspect;
+
+		{
+			static int s_gl_log = 0;
+			if (s_gl_log < 5) {
+				s_gl_log++;
+				__android_log_print(ANDROID_LOG_INFO, "SHOW_SCREEN",
+					"GL path: drawable=%dx%d frame_tex=%u frame_tex_wh=%dx%d",
+					drawableWidth, drawableHeight,
+					g_gles_renderer.frame_tex,
+					g_gles_renderer.frame_tex_w, g_gles_renderer.frame_tex_h);
+			}
+		}
+
+		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+		glClear(GL_COLOR_BUFFER_BIT);
+
+		// Upload frame pixels to GL texture
+		gles_upload_frame(&g_gles_renderer, amiga_surface, nullptr, 0, true);
+
+		// Draw frame with aspect preservation / stretch-to-fill
+		gles_draw_frame(&g_gles_renderer, drawableWidth, drawableHeight,
+		                &crop_rect, amiga_surface->w, amiga_surface->h,
+		                stretchToFill, correctAspect, amiberry_options.rotation_angle);
+
+		// OSD status line
+		if (((currprefs.leds_on_screen & STATUSLINE_CHIPSET) && !ad->picasso_on) ||
+		    ((currprefs.leds_on_screen & STATUSLINE_RTG) && ad->picasso_on))
+		{
+			update_leds(monid);
+			if (mon->statusline_surface) {
+				gles_draw_osd(&g_gles_renderer, drawableWidth, drawableHeight,
+				              mon->statusline_surface, 0, 0);
+			}
+		}
+
+		// Virtual keyboard
+		if (vkbd_allowed(monid)) {
+			vkbd_redraw_gl(drawableWidth, drawableHeight);
+		}
+	}
+#else
+	// ── Desktop crtemu rendering path ──
+	SDL_GL_GetDrawableSize(mon->amiga_window, &drawableWidth, &drawableHeight);
 	auto time = SDL_GetTicks();
 
-	int drawableWidth, drawableHeight;
-	SDL_GL_GetDrawableSize(mon->amiga_window, &drawableWidth, &drawableHeight);
 	if (crtemu_tv->type == CRTEMU_TYPE_NONE) {
 		float desired_aspect;
 		if (mon->screen_is_picasso && amiga_surface) {
@@ -1698,8 +1841,17 @@ void show_screen(const int monid, int mode)
 			glDisable(GL_BLEND);
 		}
 	}
+#endif // __ANDROID__
 
-	SDL_GL_SwapWindow(mon->amiga_window);
+#if defined(__ANDROID__) && defined(USE_VULKAN)
+	// Vulkan mode presents via vkQueuePresentKHR inside vk_draw_frame;
+	// SDL_GL_SwapWindow requires a GL context which doesn't exist for
+	// Vulkan windows, so skip it entirely.
+	if (g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) != 1)
+#endif
+	{
+		SDL_GL_SwapWindow(mon->amiga_window);
+	}
 	wait_frame_timing();
 #else
 	SDL2_showframe(monid);
@@ -3642,6 +3794,22 @@ static int create_windows(struct AmigaMonitor* mon)
 
 #ifdef USE_OPENGL
 	// Avoid forcing OpenGL on drivers likely to provide GLES-only contexts.
+#ifdef __ANDROID__
+	{
+		const bool use_vulkan =
+#if defined(USE_VULKAN)
+			g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) == 1;
+#else
+			false;
+#endif
+		if (use_vulkan) {
+			flags |= SDL_WINDOW_VULKAN;
+			write_log(_T("Using SDL_WINDOW_VULKAN for Vulkan renderer backend.\n"));
+		} else {
+			flags |= SDL_WINDOW_OPENGL;
+		}
+	}
+#else
 	const char* drv = SDL_GetCurrentVideoDriver();
 	const bool likely_gles_only = (drv && (strcmp(drv, "KMSDRM") == 0));
 	if (!likely_gles_only) {
@@ -3649,6 +3817,7 @@ static int create_windows(struct AmigaMonitor* mon)
 	} else {
 		write_log(_T("KMSDRM detected; skipping SDL_WINDOW_OPENGL to avoid GLES context with GLEW.\n"));
 	}
+#endif
 #endif
 
 	mon->amiga_window = SDL_CreateWindow(_T("Amiberry"),
@@ -3792,6 +3961,12 @@ static bool doInit(AmigaMonitor* mon)
 			mon->currentmode.native_height = rc.h;
 		}
 #ifdef USE_OPENGL
+#if defined(USE_VULKAN) && defined(__ANDROID__)
+		if (g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) == 1) {
+			// Vulkan path: skip OpenGL attribute setup and context creation.
+			// vk_init will be called after window creation.
+		} else
+#endif
 		if (!set_opengl_attributes())
 		{
 			return false;
@@ -3805,6 +3980,17 @@ static bool doInit(AmigaMonitor* mon)
 		}
 
 #ifdef USE_OPENGL
+#if defined(USE_VULKAN) && defined(__ANDROID__)
+		if (g_amiberry_android_renderer_backend.load(std::memory_order_relaxed) == 1) {
+			// Initialize Vulkan renderer instead of OpenGL
+			if (!vk_init(&g_vk_renderer, mon->amiga_window)) {
+				write_log("Vulkan renderer init failed. Aborting doInit.\n");
+				return false;
+			}
+			g_cached_vk_device_name = g_vk_renderer.device_name;
+			write_log("Vulkan renderer initialized: %s\n", g_vk_renderer.device_name);
+		} else
+#endif
 		if (!init_opengl_context(mon->amiga_window))
 		{
 			write_log("OpenGL context init failed. Aborting doInit.\n");
@@ -4314,11 +4500,20 @@ void toggle_fullscreen(const int monid, const int mode)
 void destroy_crtemu()
 {
 #ifdef USE_OPENGL
+#ifdef __ANDROID__
+#if defined(USE_VULKAN)
+	if (g_vk_renderer.initialized) {
+		vk_shutdown(&g_vk_renderer);
+	}
+#endif
+	gles_shutdown(&g_gles_renderer);
+#else
 	if (crtemu_tv != nullptr)
 	{
 		crtemu_destroy(crtemu_tv);
 		crtemu_tv = nullptr;
 	}
+#endif
 #endif
 }
 
@@ -4550,11 +4745,19 @@ void screenshot(int monid, int mode, int doprepare)
 {
 	bool success = true;
 
+#ifdef __ANDROID__
+	// Request OpenGL ES 3.0 context on Android.
+	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0) == 0);
+	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES) == 0);
+	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3) == 0);
+	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0) == 0);
+#else
 	// Request a desktop OpenGL 2.1 compatibility context for GLSL 1.20 shaders.
 	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0) == 0);
 	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY) == 0);
 	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2) == 0);
 	success &= (SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1) == 0);
+#endif
 
 	// Sensible defaults.
 	success &= (SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1) == 0);
@@ -4569,39 +4772,30 @@ void screenshot(int monid, int mode, int doprepare)
 
 	const char* drv = SDL_GetCurrentVideoDriver();
 	write_log(_T("SDL video driver: %hs\n"), drv ? drv : "unknown");
+#ifdef __ANDROID__
+	write_log(_T("Requested OpenGL ES 3.0 context\n"));
+#else
 	write_log(_T("Requested OpenGL context: 2.1 compatibility\n"));
+#endif
 
 	return success;
 }
 
 #ifdef USE_OPENGL
 
+#ifndef __ANDROID__
 static bool is_gles_context()
 {
 	const char* ver = reinterpret_cast<const char*>(glGetString(GL_VERSION));
 	return ver && (strstr(ver, "OpenGL ES") != nullptr || strstr(ver, "OpenGL ES-CM") != nullptr);
 }
+#endif
 
 /**
- * @brief Creates the OpenGL context and initializes the GLEW extension loader.
+ * @brief Creates the OpenGL context and initializes extensions / GLES renderer.
  *
- * This function must be called after an SDL window has been successfully
- * created. It performs the final steps required to prepare for OpenGL
- * rendering:
- * 1. Creates an OpenGL context and associates it with the given window.
- * 2. Binds the newly created context to the current thread.
- * 3. Initializes the GLEW library, which dynamically loads the function
- *    pointers for all available OpenGL extensions. This is essential for
- *    accessing any functionality beyond the OpenGL 1.1 core.
- *
- * The function includes error checking after each step and will log detailed
- * error messages if any part of the process fails. It also logs the vendor,
- * renderer, and version strings for debugging purposes.
- *
- * @param window A pointer to the SDL_Window that the OpenGL context will be
- *               created for.
- * @return true if the context was created and GLEW was initialized
- *         successfully, false otherwise.
+ * On Android, initializes the GLES3 renderer directly (no GLEW needed).
+ * On desktop, initializes GLEW for extension loading.
  */
 [[nodiscard]] bool init_opengl_context(SDL_Window* window)
 {
@@ -4620,14 +4814,35 @@ static bool is_gles_context()
 		return false;
 	}
 
-	// GLEW: enable modern/core entry points before init, then clear benign error.
+#ifdef __ANDROID__
+	// Android: No GLEW needed. GLES3 functions are available directly.
+	gl_platform_init();
+
+	const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+	const char* version  = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+	const char* sl_ver   = reinterpret_cast<const char*>(glGetString(GL_SHADING_LANGUAGE_VERSION));
+	write_log(_T("OpenGL ES Renderer: %hs\n"), renderer ? renderer : "unknown");
+	write_log(_T("OpenGL ES Version:  %hs\n"), version ? version : "unknown");
+	write_log(_T("GLSL ES Version:    %hs\n"), sl_ver ? sl_ver : "unknown");
+
+	// Cache for cross-thread JNI queries (nativeGetRendererDebugInfo).
+	g_cached_gl_renderer = renderer ? renderer : "unknown";
+	g_cached_gl_version  = version ? version : "unknown";
+
+	if (!gles_init(&g_gles_renderer)) {
+		write_log(_T("!!! gles_init() failed; aborting GL init.\n"));
+		SDL_GL_DeleteContext(gl_context);
+		gl_context = nullptr;
+		return false;
+	}
+#else
+	// Desktop: GLEW extension loading.
 	glewExperimental = GL_TRUE;
 	const GLenum glew_err = glewInit();
 	(void)glGetError(); // clear spurious GL_INVALID_ENUM produced by glewInit on core profiles
 
 	if (glew_err != GLEW_OK) {
 		write_log(_T("!!! Error initializing GLEW: %hs\n"), glewGetErrorString(glew_err));
-		// If GLEW reports an error but GL is valid, continue; otherwise fail.
 		const GLubyte* ver = glGetString(GL_VERSION);
 		if (!ver) {
 			write_log(_T("!!! glGetString(GL_VERSION) is null; failing OpenGL init.\n"));
@@ -4652,10 +4867,12 @@ static bool is_gles_context()
 	write_log(_T("OpenGL Renderer: %hs\n"), renderer ? renderer : "unknown");
 	write_log(_T("OpenGL Version:  %hs\n"), version ? version : "unknown");
 	write_log(_T("GLSL Version:    %hs\n"), sl_ver ? sl_ver : "unknown");
+#endif
 
 	return true;
 }
 
+#ifndef __ANDROID__
 /**
    * @brief Creates a new tightly-packed pixel buffer from a specified cropped region of an SDL_Surface.
    *
@@ -4725,4 +4942,5 @@ static uae_u8* create_packed_pixel_buffer(const SDL_Surface* src,
 	out_buffer_rect = final_crop;
 	return packed_buffer;
 }
+#endif // !__ANDROID__
 #endif

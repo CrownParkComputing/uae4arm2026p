@@ -40,6 +40,10 @@ std::atomic<int> g_amiberry_android_video_aspect_mode{1};
 // Flag to enable/disable virtual joystick processing in native code
 std::atomic<int> g_amiberry_virtual_joy_enabled{0};
 
+// Android-only runtime renderer backend selection.
+// 0 = OpenGL ES 3.0, 1 = Vulkan.
+std::atomic<int> g_amiberry_android_renderer_backend{0};
+
 // Custom SDL event type used to deliver Android MotionEvent coordinates to the emulation thread.
 // Initialized lazily from the UI thread via SDL_RegisterEvents().
 extern "C" Uint32 g_amiberry_vkbd_touch_event_type = 0;
@@ -314,6 +318,15 @@ Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererDebugInfo(JNIEnv* env, jc
 	std::string gl_renderer = "n/a";
 	std::string gl_version = "n/a";
 #ifdef USE_OPENGL
+#ifdef __ANDROID__
+	// GL context lives on the emu thread; read cached strings instead.
+	extern std::string g_cached_gl_renderer;
+	extern std::string g_cached_gl_version;
+	if (!g_cached_gl_renderer.empty())
+		gl_renderer = g_cached_gl_renderer;
+	if (!g_cached_gl_version.empty())
+		gl_version = g_cached_gl_version;
+#else
 	if (SDL_GL_GetCurrentContext()) {
 		const char* r = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 		const char* v = reinterpret_cast<const char*>(glGetString(GL_VERSION));
@@ -322,6 +335,7 @@ Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererDebugInfo(JNIEnv* env, jc
 		if (v && *v)
 			gl_version = v;
 	}
+#endif
 #endif
 
 	std::string out;
@@ -341,7 +355,19 @@ Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererDebugInfo(JNIEnv* env, jc
 #endif
 	out += "\n";
 	out += "gfx_api=";
+#ifdef __ANDROID__
+	{
+		int backend = g_amiberry_android_renderer_backend.load(std::memory_order_relaxed);
+		if (backend == 1)
+			out += "vulkan";
+		else if (!g_cached_gl_renderer.empty())
+			out += "opengl_es";
+		else
+			out += gfx_api_name(currprefs.gfx_api);
+	}
+#else
 	out += gfx_api_name(currprefs.gfx_api);
+#endif
 	out += "\n";
 	out += "gfx_api_options=";
 	out += (currprefs.gfx_api_options == 1 ? "software" : "hardware");
@@ -488,11 +514,51 @@ Java_com_uae4arm2026_AmiberryActivity_nativeIsVirtualJoystickEnabled(JNIEnv*, jc
 }
 
 extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSetRendererBackend(JNIEnv*, jclass, jint backend)
+{
+	// 0 = OpenGL ES, 1 = Vulkan
+	g_amiberry_android_renderer_backend.store(backend == 1 ? 1 : 0, std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetRendererBackend(JNIEnv*, jclass)
+{
+	return g_amiberry_android_renderer_backend.load(std::memory_order_relaxed);
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeGetGpuDeviceName(JNIEnv* env, jclass)
+{
+	if (!env) return nullptr;
+	int backend = g_amiberry_android_renderer_backend.load(std::memory_order_relaxed);
+	if (backend == 1) {
+#if defined(USE_VULKAN)
+		extern std::string g_cached_vk_device_name;
+		if (!g_cached_vk_device_name.empty())
+			return env->NewStringUTF(g_cached_vk_device_name.c_str());
+#endif
+	} else {
+#if defined(USE_OPENGL)
+		extern std::string g_cached_gl_renderer;
+		if (!g_cached_gl_renderer.empty())
+			return env->NewStringUTF(g_cached_gl_renderer.c_str());
+#endif
+	}
+	return env->NewStringUTF("");
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_com_uae4arm2026_AmiberryActivity_nativeResetEmulator(JNIEnv*, jclass)
 {
 	// Queue a soft reset action to be executed on the emulation thread.
 	// This is equivalent to the user pressing the reset key combination.
 	inputdevice_add_inputcode(AKS_SOFTRESET, 1, nullptr);
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_uae4arm2026_AmiberryActivity_nativeSendAmigaKey(JNIEnv*, jclass, jint keycode, jint pressed)
+{
+	inputdevice_do_keyboard(keycode, pressed);
 }
 #endif
 
